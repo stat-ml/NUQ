@@ -33,8 +33,8 @@ if __name__ == '__main__':
     plot_data(X, y)
     # strategy options: 'isj', 'silverman', 'scott', 'classification'
     strategy = "classification"
-    nw_classifier = NewNW(bandwidth=np.array([0.4, 0.4]), strategy=strategy.lower(), tune_bandwidth=True,
-                          precise_computation=False, n_neighbors=100)
+    nw_classifier = NewNW(bandwidth=np.array([1., 1.]), strategy=strategy.lower(), tune_bandwidth=False,
+                          precise_computation=True, n_neighbors=50, use_centroids=False)
     nw_classifier.fit(X=X_train, y=y_train)
     #
     x_min, x_max = X[:, 0].min() - 5, X[:, 0].max() + 5

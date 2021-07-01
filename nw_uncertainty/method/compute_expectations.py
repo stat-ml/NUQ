@@ -47,6 +47,19 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
     return w_raw, selected_labels
 
 
+def compute_logsumexp(log_weights, targets, coeff, log_denomerator=None):
+    log_numerator_pre = logsumexp(log_weights, axis=1, b=targets)
+    broadcast_shape = (1, log_numerator_pre.shape[0], log_numerator_pre.shape[1])
+    concated_array = np.concatenate([log_numerator_pre[None], np.log(coeff) * np.ones(shape=broadcast_shape)],
+                                    axis=0)
+    log_numerator = logsumexp(concated_array, axis=0)
+
+    if log_denomerator is None:
+        log_denomerator = logsumexp(log_weights, axis=1)
+    f_hat = log_numerator - log_denomerator
+    return f_hat, log_denomerator
+
+
 def get_nw_mean_estimate(targets, weights, precise_computation, coeff=1.):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
@@ -59,13 +72,9 @@ def get_nw_mean_estimate(targets, weights, precise_computation, coeff=1.):
         assert f_hat.shape == (weights.shape[0], targets.shape[-1])
     else:
         log_weights = weights
-
-        log_numerator = logsumexp(log_weights, axis=1, b=targets)
-        log_denomerator = logsumexp(log_weights, axis=1)
-        f_hat = log_numerator - log_denomerator
-
-        log_numerator = logsumexp(log_weights, axis=1, b=1 - targets)
-        f1_hat = log_numerator - log_denomerator
+        f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, coeff=coeff)
+        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=coeff,
+                                      log_denomerator=log_denomerator)
 
         assert f_hat.shape == (log_weights.shape[0], targets.shape[-1])
         assert f1_hat.shape == (log_weights.shape[0], targets.shape[-1])
