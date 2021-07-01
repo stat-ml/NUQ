@@ -123,22 +123,24 @@ class NewNW(BaseEstimator, ClassifierMixin):
         output = self.predict_proba(X)
         f_hat_y_x = output["probs"]
         f1_hat_y_x = output["probsm1"]
+        mean_class_prob = np.mean(self.training_labels_, axis=0, keepdims=True)
         if not self.precise_computation:
             sigma_hat_est = f_hat_y_x * (1 - f_hat_y_x)
             as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
                                     n=self.n_neighbors)
-            Ue = np.sum(
-                half_gaussian_mean(asymptotic_var=as_var) * np.mean(self.training_labels_, axis=0, keepdims=True),
-                axis=1)
+
+            Ue = np.sum(half_gaussian_mean(asymptotic_var=as_var) * mean_class_prob, axis=1)
+            Ua = np.sum(sigma_hat_est * mean_class_prob, axis=1)
+            total_uncertainty = Ue + Ua
         else:
             sigma_hat_est = f_hat_y_x + f1_hat_y_x
             log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x, bandwidth=self.bandwidth,
                                             n=X.shape[0], dim=self.training_embeddings_.shape[1])
-            Ue = logsumexp(log_half_gaussian_mean(asymptotic_var=log_as_var) + np.log(
-                np.mean(self.training_labels_, axis=0, keepdims=True)),
-                           axis=1)
+            Ue = logsumexp(log_half_gaussian_mean(asymptotic_var=log_as_var) + np.log(mean_class_prob), axis=1)
+            Ua = logsumexp(sigma_hat_est + np.log(mean_class_prob), axis=1)
             Ue = np.clip(Ue, a_min=1e-40, a_max=None)
-        return Ue
+            total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0)
+        return {"epistemic": Ue, "aleatoric": Ua, "total": total_uncertainty}
 
     def predict_proba(self, X, batch_size=50000):
         check_is_fitted(self)

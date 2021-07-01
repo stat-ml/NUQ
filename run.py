@@ -62,6 +62,7 @@ if __name__ == '__main__':
     ax[0].set_title('Raw data')
     ax[0].scatter(X_train[:, 0], X_train[:, 1], c=y_train)
     # strategy options: 'isj', 'silverman', 'scott', 'classification'
+    uncertainty_type = "aleatoric"
     for i, strategy in enumerate(['Isj', 'Silverman', 'Scott', 'Classification']):
         # strategy = "classification"
         precise_computation = True
@@ -69,8 +70,9 @@ if __name__ == '__main__':
                               precise_computation=precise_computation, n_neighbors=100)
         nw_classifier.fit(X=X_train, y=y_train)
 
-        ax[i + 1].set_title(f'Uncertainty, {strategy}')
-        Ue = nw_classifier.predict_uncertartainty(X_test)
+        ax[i + 1].set_title(f'Uncertainty {uncertainty_type}, {strategy}')
+        uncertainty = nw_classifier.predict_uncertartainty(X_test)
+        Ue = uncertainty[uncertainty_type]
         if precise_computation:
             ax[i + 1].contourf(xx, yy, Ue.reshape(*xx.shape))
         else:
