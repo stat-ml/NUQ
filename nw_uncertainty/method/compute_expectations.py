@@ -89,7 +89,7 @@ def p_hat_x(weights, n, h, precise_computation, dim):
         weights = weights.reshape(1, -1)[..., None]
     # np.prod!! instead of np.mean
     if not precise_computation:
-        f_hat_x = np.sum(weights.squeeze(-1) / (n * np.prod(h)), axis=-1)
+        f_hat_x = np.sum(weights.squeeze(-1) / (n * np.mean(h)), axis=-1)
     else:
         log_weights = weights
         dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
@@ -103,7 +103,7 @@ def asymptotic_var(sigma_est, f_est, bandwidth, n):
     if len(f_est.shape) < 2:
         f_est = f_est[..., None]
     # np.prod!! instead of np.mean
-    return (sigma_est * np.sqrt(np.pi)) / (np.prod(bandwidth) * f_est * n + 1e-20)
+    return (sigma_est * np.sqrt(np.pi)) / (np.mean(bandwidth) * f_est * n + 1e-20)
 
 
 def log_asymptotic_var(log_sigma_est, log_f_est, bandwidth, n, dim):

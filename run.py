@@ -62,11 +62,11 @@ if __name__ == '__main__':
     ax[0].set_title('Raw data')
     ax[0].scatter(X_train[:, 0], X_train[:, 1], c=y_train)
     # strategy options: 'isj', 'silverman', 'scott', 'classification'
-    for i, strategy in enumerate(['isj', 'silverman', 'scott', 'Classification']):
+    for i, strategy in enumerate(['Isj', 'Silverman', 'Scott', 'Classification']):
         # strategy = "classification"
         precise_computation = True
         nw_classifier = NewNW(bandwidth=np.array([0.4, 0.4]), strategy=strategy.lower(), tune_bandwidth=True,
-                              precise_computation=precise_computation, n_neighbors=50)
+                              precise_computation=precise_computation, n_neighbors=100)
         nw_classifier.fit(X=X_train, y=y_train)
 
         ax[i + 1].set_title(f'Uncertainty, {strategy}')

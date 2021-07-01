@@ -66,10 +66,12 @@ class NewNW(BaseEstimator, ClassifierMixin):
         #     self.bandwidth = self.bandwidth.repeat(X.shape[1])
         targets = y.reshape(-1)
         if not self.use_centroids:
-            y_ohe = np.eye(len(np.unique(y)))[targets]
+            # y_ohe = np.eye(len(np.unique(y)))[targets]
+            y_ohe = np.eye(np.max(y) + 1)[targets]
         else:
             X, y = compute_centroids(embeddings=X, labels=targets)
-            y_ohe = np.eye(len(np.unique(y)))[y]
+            y_ohe = np.eye(np.max(y) + 1)[y]
+            # y_ohe = np.eye(len(np.unique(y)))[y]
 
         self.training_embeddings_ = X
         self.training_labels_ = y_ohe
