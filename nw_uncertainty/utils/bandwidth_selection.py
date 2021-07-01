@@ -14,7 +14,7 @@ def to_multidim(X, method):
 
 
 def classification_selection(X, y, knn, constructor, precise_computation, n_neighbors):
-    _, distances = knn.knn_query(X, k=100)
+    _, distances = knn.knn_query(X, k=n_neighbors)
     mean_distances = distances.mean(0)
     classificator = constructor(tune_bandwidth=False, precise_computation=precise_computation, n_neighbors=n_neighbors)
     gs = GridSearchCV(classificator,
