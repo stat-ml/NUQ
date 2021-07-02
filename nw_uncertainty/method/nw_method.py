@@ -93,11 +93,11 @@ class NewNW(BaseEstimator, ClassifierMixin):
         return self
 
     def _get_nw_estimates(self, X, batch_size):
-        batches = [X[i:i + batch_size] for i in
-                   range(0, len(X), batch_size)]
+        batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
         f_hat = np.array([])
         f1_hat = np.array([])
-        for embedding_batch in batches:
+        for batch in batches:
+            embedding_batch = X[batch[0]: batch[1]]
             weights, selected_labels = compute_weights(knn=self.fast_knn, kernel=self.kernel,
                                                        current_embeddings=embedding_batch,
                                                        train_embeddings=self.training_embeddings_,
@@ -119,18 +119,21 @@ class NewNW(BaseEstimator, ClassifierMixin):
         return f_hat, f1_hat
 
     def predict_uncertartainty(self, X, batch_size=50000):
-        f_hat_x_full = self.get_kde(X)
-        output = self.predict_proba(X)
-        f_hat_y_x_full = output["probs"]
-        f1_hat_y_x_full = output["probsm1"]
+        batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
         mean_class_prob = np.mean(self.training_labels_, axis=0, keepdims=True)
-        batches = [(f_hat_x_full[i:i + batch_size], f_hat_y_x_full[i:i + batch_size], f1_hat_y_x_full[i:i + batch_size])
-                   for i in range(0, len(X), batch_size)]
         Ue_total = np.array([])
         Ua_total = np.array([])
         Ut_total = np.array([])
         for batch in batches:
-            f_hat_x, f_hat_y_x, f1_hat_y_x = batch
+            X_batch = X[batch[0]: batch[1]]
+            f_hat_x_full = self.get_kde(X_batch, batch_size=batch_size)
+            output = self.predict_proba(X_batch, batch_size=batch_size)
+            f_hat_y_x_full = output["probs"]
+            f1_hat_y_x_full = output["probsm1"]
+
+            f_hat_x = f_hat_x_full[batch[0]: batch[1]]
+            f_hat_y_x = f_hat_y_x_full[batch[0]: batch[1]]
+            f1_hat_y_x = f1_hat_y_x_full[batch[0]: batch[1]]
             if not self.precise_computation:
                 sigma_hat_est = f_hat_y_x * f1_hat_y_x
                 as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
@@ -148,6 +151,7 @@ class NewNW(BaseEstimator, ClassifierMixin):
                 Ua = logsumexp(np.minimum(f_hat_y_x, f1_hat_y_x) + np.log(mean_class_prob), axis=1)
                 Ue = np.clip(Ue, a_min=-1e40, a_max=None)
                 total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0)
+
             if Ue_total.shape[0] == 0:
                 Ue_total = Ue
                 Ua_total = Ua
@@ -174,10 +178,10 @@ class NewNW(BaseEstimator, ClassifierMixin):
         return output
 
     def get_kde(self, X, batch_size=50000):
-        batches = [X[i:i + batch_size] for i in
-                   range(0, len(X), batch_size)]
+        batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
         f_hat_x = np.array([])
-        for X_batch in batches:
+        for batch in batches:
+            X_batch = X[batch[0]: batch[1]]
             weights, labels = compute_weights(knn=self.fast_knn,
                                               kernel=self.kernel,
                                               current_embeddings=X_batch,
