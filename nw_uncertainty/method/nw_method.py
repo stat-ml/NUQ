@@ -118,29 +118,45 @@ class NewNW(BaseEstimator, ClassifierMixin):
 
         return f_hat, f1_hat
 
-    def predict_uncertartainty(self, X):
-        f_hat_x = self.get_kde(X)
+    def predict_uncertartainty(self, X, batch_size=50000):
+        f_hat_x_full = self.get_kde(X)
         output = self.predict_proba(X)
-        f_hat_y_x = output["probs"]
-        f1_hat_y_x = output["probsm1"]
+        f_hat_y_x_full = output["probs"]
+        f1_hat_y_x_full = output["probsm1"]
         mean_class_prob = np.mean(self.training_labels_, axis=0, keepdims=True)
-        if not self.precise_computation:
-            sigma_hat_est = f_hat_y_x * (1 - f_hat_y_x)
-            as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
-                                    n=self.n_neighbors)
+        batches = [(f_hat_x_full[i:i + batch_size], f_hat_y_x_full[i:i + batch_size], f1_hat_y_x_full[i:i + batch_size])
+                   for i in range(0, len(X), batch_size)]
+        Ue_total = np.array([])
+        Ua_total = np.array([])
+        Ut_total = np.array([])
+        for batch in batches:
+            f_hat_x, f_hat_y_x, f1_hat_y_x = batch
+            if not self.precise_computation:
+                sigma_hat_est = f_hat_y_x * f1_hat_y_x
+                as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
+                                        n=self.n_neighbors)
 
-            Ue = np.sum(half_gaussian_mean(asymptotic_var=as_var) * mean_class_prob, axis=1)
-            Ua = np.sum(sigma_hat_est * mean_class_prob, axis=1)
-            total_uncertainty = Ue + Ua
-        else:
-            sigma_hat_est = f_hat_y_x + f1_hat_y_x
-            log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x, bandwidth=self.bandwidth,
-                                            n=X.shape[0], dim=self.training_embeddings_.shape[1])
-            Ue = logsumexp(log_half_gaussian_mean(asymptotic_var=log_as_var) + np.log(mean_class_prob), axis=1)
-            Ua = logsumexp(sigma_hat_est + np.log(mean_class_prob), axis=1)
-            Ue = np.clip(Ue, a_min=1e-40, a_max=None)
-            total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0)
-        return {"epistemic": Ue, "aleatoric": Ua, "total": total_uncertainty}
+                Ue = np.sum(half_gaussian_mean(asymptotic_var=as_var) * mean_class_prob, axis=1)
+                Ua = np.sum(np.minimum(f_hat_y_x, f1_hat_y_x) * mean_class_prob, axis=1)
+                total_uncertainty = Ue + Ua
+            else:
+                sigma_hat_est = f_hat_y_x + f1_hat_y_x
+                log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
+                                                bandwidth=self.bandwidth,
+                                                n=X.shape[0], dim=self.training_embeddings_.shape[1])
+                Ue = logsumexp(log_half_gaussian_mean(asymptotic_var=log_as_var) + np.log(mean_class_prob), axis=1)
+                Ua = logsumexp(np.minimum(f_hat_y_x, f1_hat_y_x) + np.log(mean_class_prob), axis=1)
+                Ue = np.clip(Ue, a_min=-1e40, a_max=None)
+                total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0)
+            if Ue_total.shape[0] == 0:
+                Ue_total = Ue
+                Ua_total = Ua
+                Ut_total = total_uncertainty
+            else:
+                Ue_total = np.concatenate([Ue_total, Ue])
+                Ua_total = np.concatenate([Ua_total, Ua])
+                Ut_total = np.concatenate([Ut_total, total_uncertainty])
+        return {"epistemic": Ue_total, "aleatoric": Ua_total, "total": Ut_total}
 
     def predict_proba(self, X, batch_size=50000):
         check_is_fitted(self)
@@ -157,16 +173,25 @@ class NewNW(BaseEstimator, ClassifierMixin):
 
         return output
 
-    def get_kde(self, X):
-        weights, labels = compute_weights(knn=self.fast_knn,
-                                          kernel=self.kernel,
-                                          current_embeddings=X,
-                                          train_embeddings=self.training_embeddings_,
-                                          training_labels=self.training_labels_,
-                                          n_neighbors=self.n_neighbors,
-                                          method=self.method)
-        f_hat_x = p_hat_x(weights=weights, n=self.n_neighbors, h=self.bandwidth, dim=self.training_embeddings_.shape[1],
-                          precise_computation=self.precise_computation)
+    def get_kde(self, X, batch_size=50000):
+        batches = [X[i:i + batch_size] for i in
+                   range(0, len(X), batch_size)]
+        f_hat_x = np.array([])
+        for X_batch in batches:
+            weights, labels = compute_weights(knn=self.fast_knn,
+                                              kernel=self.kernel,
+                                              current_embeddings=X_batch,
+                                              train_embeddings=self.training_embeddings_,
+                                              training_labels=self.training_labels_,
+                                              n_neighbors=self.n_neighbors,
+                                              method=self.method)
+            f_hat_x_current = p_hat_x(weights=weights, n=self.n_neighbors, h=self.bandwidth,
+                                      dim=self.training_embeddings_.shape[1],
+                                      precise_computation=self.precise_computation)
+            if f_hat_x.shape[0] == 0:
+                f_hat_x = f_hat_x_current
+            else:
+                f_hat_x = np.concatenate([f_hat_x, f_hat_x_current])
         return f_hat_x
 
     def predict(self, X, batch_size=50000):

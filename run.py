@@ -57,13 +57,13 @@ if __name__ == '__main__':
     # plt.contourf(xx, yy, Ue.reshape(*xx.shape))
     # plt.show()
 
-    fig, ax = plt.subplots(nrows=1, ncols=5, figsize=(25, 6), dpi=200, sharey=True)
+    fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(20, 6), dpi=200, sharey=True)
     # plt.suptitle(f"{strategy} strategy for bandwidth selection")
     ax[0].set_title('Raw data')
     ax[0].scatter(X_train[:, 0], X_train[:, 1], c=y_train)
     # strategy options: 'isj', 'silverman', 'scott', 'classification'
-    uncertainty_type = "aleatoric"
-    for i, strategy in enumerate(['Isj', 'Silverman', 'Scott', 'Classification']):
+    uncertainty_type = "epistemic"
+    for i, strategy in enumerate(['ISJ', 'Classification']):
         # strategy = "classification"
         precise_computation = True
         nw_classifier = NewNW(bandwidth=np.array([0.4, 0.4]), strategy=strategy.lower(), tune_bandwidth=True,
