@@ -131,9 +131,9 @@ class NewNW(BaseEstimator, ClassifierMixin):
             f_hat_y_x_full = output["probs"]
             f1_hat_y_x_full = output["probsm1"]
 
-            f_hat_x = f_hat_x_full[batch[0]: batch[1]]
-            f_hat_y_x = f_hat_y_x_full[batch[0]: batch[1]]
-            f1_hat_y_x = f1_hat_y_x_full[batch[0]: batch[1]]
+            f_hat_x = f_hat_x_full
+            f_hat_y_x = f_hat_y_x_full
+            f1_hat_y_x = f1_hat_y_x_full
             if not self.precise_computation:
                 sigma_hat_est = f_hat_y_x * f1_hat_y_x
                 as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
