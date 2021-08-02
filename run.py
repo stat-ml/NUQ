@@ -4,6 +4,8 @@ import numpy as np
 from sklearn.datasets import make_blobs
 from sklearn.model_selection import train_test_split
 
+from pytorchcv.model_provider import get_model
+
 from nw_uncertainty import NewNW
 
 matplotlib.rcParams['pdf.fonttype'] = 42
@@ -28,7 +30,7 @@ def make_data(total_size=5000, centers=np.array([[-4., -4.], [0., 4.]])):
 if __name__ == '__main__':
     ## Make a dataset
     X, y = make_data(total_size=10000,
-                     centers=np.array([[3., 0.], [3., 2.], [0., 10]]))
+                     centers=np.array([[2., 0.], [0., 2.], [-7., 0.]]))
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
     plot_data(X, y)
     # strategy options: 'isj', 'silverman', 'scott', 'classification'
@@ -57,35 +59,29 @@ if __name__ == '__main__':
     # plt.contourf(xx, yy, Ue.reshape(*xx.shape))
     # plt.show()
 
-    fig, ax = plt.subplots(nrows=1, ncols=4, figsize=(20, 6), dpi=200, sharey=True)
+    fig, ax = plt.subplots(nrows=1, ncols=5, figsize=(20, 6), dpi=200, sharey=True)
     # plt.suptitle(f"{strategy} strategy for bandwidth selection")
     ax[0].set_title('Raw data')
     ax[0].scatter(X_train[:, 0], X_train[:, 1], c=y_train)
 
     # strategy options: 'isj', 'silverman', 'scott', 'classification'
-    uncertainty_type = "aleatoric"
-    for i, strategy in enumerate(['ISJ', 'Classification']):
-        # strategy = "classification"
-        precise_computation = True
-        nw_classifier = NewNW(bandwidth=np.array([0.4, 0.4]), strategy=strategy.lower(), tune_bandwidth=True,
-                              precise_computation=precise_computation, n_neighbors=100, coeff=1e-10)
-        nw_classifier.fit(X=X_train, y=y_train)
-
-        ax[1].set_title('Classification')
-        f_hat_y_x = nw_classifier.predict_proba(X_test)["probs"]
-        ax[1].contourf(xx, yy, np.max(f_hat_y_x, axis=-1).reshape(*xx.shape))
-
+    # uncertainty_type = "epistemic"
+    strategy = "isj"
+    nw_classifier = NewNW(bandwidth=np.array([0.04, 0.04]), strategy=strategy.lower(), tune_bandwidth=True,
+                          n_neighbors=50, coeff=1e-5)
+    nw_classifier.fit(X=X_train, y=y_train)
+    output = nw_classifier.predict_proba(X=X_test, return_uncertainties=True)
+    ax[1].set_title('Classification')
+    ax[1].contourf(xx, yy, np.exp(np.max(output["probs"], axis=-1).reshape(*xx.shape)))
+    for i, uncertainty_type in enumerate(['epistemic', 'aleatoric', 'total']):
         ax[i + 2].set_title(f'Uncertainty {uncertainty_type}, {strategy}')
-        uncertainty = nw_classifier.predict_uncertartainty(X_test)
-        Ue = uncertainty[uncertainty_type]
-        if precise_computation:
-            ax[i + 2].contourf(xx, yy, Ue.reshape(*xx.shape))
-        else:
-            ax[i + 2].contourf(xx, yy, np.log(Ue.reshape(*xx.shape)))
+        Ue = output[uncertainty_type]
+        ax[i + 2].contourf(xx, yy, Ue.reshape(*xx.shape))
 
-        print(f"{strategy}, {[10., 0.]}: {nw_classifier.predict_uncertartainty(np.array([[10., 0.]]))}, "
-              f"{[0., 0.]}: {nw_classifier.predict_uncertartainty(np.array([[0., 0.]]))},"
-              f"{[20., 20.]}: {nw_classifier.predict_uncertartainty(np.array([[20., 20.]]))}")
+        print(
+            f"{strategy}, {[20., 0.]}: {nw_classifier.predict_proba(np.array([[20., 0.]]), return_uncertainties=True)['probs']}, "
+            f"{[0., 20.]}: {nw_classifier.predict_proba(np.array([[0., 20.]]), return_uncertainties=True)['probs']},"
+            f"{[20., 20.]}: {nw_classifier.predict_proba(np.array([[20., 20.]]), return_uncertainties=True)['probs']}")
     plt.tight_layout()
     plt.savefig('./pics/nw_res_log.pdf', format='pdf')
     plt.show()

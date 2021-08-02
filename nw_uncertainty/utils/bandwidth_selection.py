@@ -13,10 +13,10 @@ def to_multidim(X, method):
     return bandwidth
 
 
-def classification_selection(X, y, knn, constructor, precise_computation, n_neighbors):
+def classification_selection(X, y, knn, constructor, n_neighbors):
     _, distances = knn.knn_query(X, k=n_neighbors)
     mean_distances = distances.mean(0)
-    classificator = constructor(tune_bandwidth=False, precise_computation=precise_computation, n_neighbors=n_neighbors)
+    classificator = constructor(tune_bandwidth=False, n_neighbors=n_neighbors)
     gs = GridSearchCV(classificator,
                       param_grid={
                           'bandwidth': [np.array(i) for i in mean_distances][5::5]
@@ -28,7 +28,7 @@ def classification_selection(X, y, knn, constructor, precise_computation, n_neig
     return gs.best_params_['bandwidth']
 
 
-def tune_kernel(X, y, knn=None, strategy="isj", constructor=None, precise_computation=True, n_neighbors=20):
+def tune_kernel(X, y, knn=None, strategy="isj", constructor=None, n_neighbors=20):
     if strategy == 'isj':
         bandwidth = X.shape[1] * to_multidim(X=X, method=improved_sheather_jones)
 
@@ -38,8 +38,7 @@ def tune_kernel(X, y, knn=None, strategy="isj", constructor=None, precise_comput
     elif strategy == 'scott':
         bandwidth = X.shape[1] * to_multidim(X=X, method=scotts_rule)
     elif strategy == 'classification':
-        bandwidth = classification_selection(X=X, y=y, knn=knn, constructor=constructor,
-                                             precise_computation=precise_computation, n_neighbors=n_neighbors)
+        bandwidth = classification_selection(X=X, y=y, knn=knn, constructor=constructor, n_neighbors=n_neighbors)
     else:
         raise ValueError("No such strategy")
     return bandwidth
