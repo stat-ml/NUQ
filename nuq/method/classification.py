@@ -6,11 +6,12 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.datasets import make_blobs
 from sklearn.utils.validation import check_X_y, check_is_fitted, check_array
 
-from nw_uncertainty.method.compute_expectations import (get_kernel, compute_weights, get_nw_mean_estimate, p_hat_x,
-                                                        asymptotic_var,
-                                                        half_gaussian_mean, log_asymptotic_var, log_half_gaussian_mean,
-                                                        compute_centroids)
-from nw_uncertainty.utils.bandwidth_selection import tune_kernel
+from .compute_expectations import (
+    get_kernel, compute_weights, get_nw_mean_estimate, p_hat_x,
+    asymptotic_var, half_gaussian_mean, log_asymptotic_var,
+    log_half_gaussian_mean, compute_centroids
+)
+from ..utils.bandwidth_selection import tune_kernel
 
 
 def plot_data(X, y):
@@ -26,7 +27,7 @@ def make_data(total_size=5000, centers=np.array([[-4., -4.], [0., 4.]])):
     return X, y
 
 
-class NewNW(BaseEstimator, ClassifierMixin):
+class NuqClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.001, tune_bandwidth=True,
                  strategy='isj',
                  bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False):
@@ -66,12 +67,10 @@ class NewNW(BaseEstimator, ClassifierMixin):
         #     self.bandwidth = self.bandwidth.repeat(X.shape[1])
         targets = y.reshape(-1)
         if not self.use_centroids:
-            # y_ohe = np.eye(len(np.unique(y)))[targets]
             y_ohe = np.eye(np.max(y) + 1)[targets]
         else:
             X, y = compute_centroids(embeddings=X, labels=targets)
             y_ohe = np.eye(np.max(y) + 1)[y]
-            # y_ohe = np.eye(len(np.unique(y)))[y]
 
         self.training_embeddings_ = X
         self.training_labels_ = y_ohe
@@ -86,7 +85,7 @@ class NewNW(BaseEstimator, ClassifierMixin):
 
         if self.tune_bandwidth:
             self.bandwidth = tune_kernel(X=self.training_embeddings_, y=y, strategy=self.strategy, knn=self.fast_knn,
-                                         constructor=NewNW, precise_computation=self.precise_computation,
+                                         constructor=NuqClassifier, precise_computation=self.precise_computation,
                                          n_neighbors=self.n_neighbors)
             self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
                                      precise_computation=self.precise_computation)
