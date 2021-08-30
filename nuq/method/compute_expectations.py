@@ -95,7 +95,10 @@ def p_hat_x(weights, n, h, precise_computation, dim):
         dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
         f_hat_x = -np.log(n) - dim_multiplier * np.sum(np.log(h)) + logsumexp(log_weights, axis=1)
 
-    assert f_hat_x.shape[0] == weights.shape[0], f"Received shapes are {f_hat_x.shape[0]=} and {weights.shape[0]=}"
+    assert (
+        f_hat_x.shape[0] == weights.shape[0],
+        f"Received shapes are: f_hat shape is {f_hat_x.shape[0]} and weights shape is {weights.shape[0]}"
+    )
     return f_hat_x
 
 
