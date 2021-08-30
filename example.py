@@ -57,16 +57,16 @@ if __name__ == '__main__':
         ax[1].contourf(xx, yy, np.max(f_hat_y_x, axis=-1).reshape(*xx.shape))
 
         ax[i + 2].set_title(f'Uncertainty {uncertainty_type}, {strategy}')
-        uncertainty = nuq.predict_uncertartainty(X_test)
+        uncertainty = nuq.predict_uncertainty(X_test)
         Ue = uncertainty[uncertainty_type]
         if precise_computation:
             ax[i + 2].contourf(xx, yy, Ue.reshape(*xx.shape))
         else:
             ax[i + 2].contourf(xx, yy, np.log(Ue.reshape(*xx.shape)))
 
-        print(f"{strategy}, {[10., 0.]}: {nuq.predict_uncertartainty(np.array([[10., 0.]]))}, "
-              f"{[0., 0.]}: {nuq.predict_uncertartainty(np.array([[0., 0.]]))},"
-              f"{[20., 20.]}: {nuq.predict_uncertartainty(np.array([[20., 20.]]))}")
+        print(f"{strategy}, {[10., 0.]}: {nuq.predict_uncertainty(np.array([[10., 0.]]))}, "
+              f"{[0., 0.]}: {nuq.predict_uncertainty(np.array([[0., 0.]]))},"
+              f"{[20., 20.]}: {nuq.predict_uncertainty(np.array([[20., 20.]]))}")
     plt.tight_layout()
     plt.savefig('./pics/nuq_res_log.pdf', format='pdf')
     plt.show()

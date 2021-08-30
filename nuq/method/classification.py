@@ -117,7 +117,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         return f_hat, f1_hat
 
-    def predict_uncertartainty(self, X, batch_size=50000):
+    def predict_uncertainty(self, X, batch_size=50000):
         batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
         mean_class_prob = np.mean(self.training_labels_, axis=0, keepdims=True)
         Ue_total = np.array([])

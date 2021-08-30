@@ -11,7 +11,7 @@ nuq = NuqClassifier(
     strategy='isj', tune_bandwidth=True, n_neighbors=100
 )
 nuq.fit(X_train, y_train)
-uncertainty = nuq.predict_uncertartainty(X_test)['total']
+uncertainty = nuq.predict_uncertainty(X_test)['total']
 ```
 (see example.py for a full example)
 
