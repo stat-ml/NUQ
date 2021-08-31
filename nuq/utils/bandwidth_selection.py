@@ -22,7 +22,7 @@ def classification_selection(X, y, knn, constructor, precise_computation, n_neig
                           'bandwidth': [np.array(i) for i in mean_distances][5::5]
                       }, scoring='accuracy', cv=3)
     gs.fit(X, y)
-    print(f"{mean_distances=}")
+    print(f"mean distance = {mean_distances}")
     print(f"{gs.best_params_['bandwidth']}")
     print('Best accuracy ', gs.best_score_)
     return gs.best_params_['bandwidth']
