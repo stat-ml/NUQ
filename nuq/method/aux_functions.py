@@ -1,5 +1,20 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy.special import logsumexp
+from sklearn.datasets import make_blobs
+
+
+def plot_data(X, y):
+    plt.close()
+    plt.figure()
+    plt.scatter(X[:, 0], X[:, 1], c=y)
+    plt.tight_layout()
+    plt.show()
+
+
+def make_data(total_size=5000, centers=np.array([[-4., -4.], [0., 4.]])):
+    X, y = make_blobs(n_samples=total_size, n_features=2, centers=centers)
+    return X, y
 
 
 def get_kernel(name='RBF', **kwargs):
@@ -36,18 +51,13 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
     selected_embeddings = train_embeddings[indices]
     selected_labels = training_labels[indices]
 
-    # ####
-    # selected_embeddings = train_embeddings
-    # selected_labels = np.repeat(training_labels[None], training_labels.shape[0], axis=0)
-    # # ####
-
     w_raw = kernel(current_embeddings[:, None, :], selected_embeddings)[..., None]
 
     assert w_raw.shape == (current_embeddings.shape[0], n_neighbors, 1)
     return w_raw, selected_labels
 
 
-def compute_logsumexp(log_weights, targets, coeff, log_denomerator=None):
+def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=None):
     log_numerator_pre = logsumexp(log_weights, axis=1, b=targets)
     broadcast_shape = (1, log_numerator_pre.shape[0], log_numerator_pre.shape[1])
     concated_array = np.concatenate([log_numerator_pre[None], np.log(coeff) * np.ones(shape=broadcast_shape)],
@@ -55,12 +65,17 @@ def compute_logsumexp(log_weights, targets, coeff, log_denomerator=None):
     log_numerator = logsumexp(concated_array, axis=0)
 
     if log_denomerator is None:
-        log_denomerator = logsumexp(log_weights, axis=1)
+        log_denomerator_pre = logsumexp(log_weights, axis=1)
+        broadcast_shape = (1, log_denomerator_pre.shape[0], log_denomerator_pre.shape[1])
+        concated_array = np.concatenate(
+            [log_denomerator_pre[None], np.log(n_classes * coeff) * np.ones(shape=broadcast_shape)],
+            axis=0)
+        log_denomerator = logsumexp(concated_array, axis=0)
     f_hat = log_numerator - log_denomerator
     return f_hat, log_denomerator
 
 
-def get_nw_mean_estimate(targets, weights, precise_computation, coeff=1.):
+def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, coeff=1.):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
@@ -72,8 +87,10 @@ def get_nw_mean_estimate(targets, weights, precise_computation, coeff=1.):
         assert f_hat.shape == (weights.shape[0], targets.shape[-1])
     else:
         log_weights = weights
-        f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, coeff=coeff)
-        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=coeff,
+        f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, n_classes=n_clasees,
+                                                   coeff=coeff)
+        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees - 1.) * coeff,
+                                      n_classes=n_clasees,
                                       log_denomerator=log_denomerator)
 
         assert f_hat.shape == (log_weights.shape[0], targets.shape[-1])
