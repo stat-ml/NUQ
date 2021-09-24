@@ -88,7 +88,7 @@ def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, coeff
         log_weights = weights
         f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, n_classes=n_clasees,
                                                    coeff=coeff)
-        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees -1.) * coeff,
+        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees - 1.) * coeff,
                                       n_classes=n_clasees,
                                       log_denomerator=log_denomerator)
 
@@ -105,11 +105,12 @@ def p_hat_x(weights, n, h, precise_computation, dim):
         weights = weights.reshape(1, -1)[..., None]
     # np.prod!! instead of np.mean
     if not precise_computation:
-        f_hat_x = np.sum(weights.squeeze(-1) / (n * np.prod(h)), axis=-1)
+        f_hat_x = np.sum(weights.squeeze(-1) / ((np.pi ** (dim / 2)) * n * np.prod(h)), axis=-1)
     else:
         log_weights = weights
         dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
-        f_hat_x = -np.log(n) - dim_multiplier * np.sum(np.log(h)) + logsumexp(log_weights, axis=1)
+        f_hat_x = -np.log(n) - dim / 2 * np.log(np.pi) - dim_multiplier * np.sum(np.log(h)) + logsumexp(log_weights,
+                                                                                                        axis=1)
 
     assert (
         f_hat_x.shape[0] == weights.shape[0],
