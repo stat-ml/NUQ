@@ -103,7 +103,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
     def predict_uncertainty(self, X, batch_size=50000):
         batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
-        mean_class_prob = np.mean(self.training_labels_, axis=0, keepdims=True)
         Ue_total = np.array([])
         Ua_total = np.array([])
         Ut_total = np.array([])
@@ -118,22 +117,22 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             f_hat_y_x = f_hat_y_x_full
             f1_hat_y_x = f1_hat_y_x_full
             if not self.precise_computation:
-                sigma_hat_est = f_hat_y_x * f1_hat_y_x
+                sigma_hat_est = np.max(f_hat_y_x * f1_hat_y_x, axis=1, keepdims=True)
                 as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
                                         n=self.n_neighbors)
 
-                Ue = np.sum(half_gaussian_mean(asymptotic_var=as_var) * mean_class_prob, axis=1)
-                Ua = np.sum(np.minimum(f_hat_y_x, f1_hat_y_x) * mean_class_prob, axis=1)
+                Ue = half_gaussian_mean(asymptotic_var=as_var).squeeze()
+                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True).squeeze()
                 total_uncertainty = Ue + Ua
             else:
-                sigma_hat_est = f_hat_y_x + f1_hat_y_x
+                sigma_hat_est = np.max(f_hat_y_x + f1_hat_y_x, axis=1, keepdims=True)
                 log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
                                                 bandwidth=self.bandwidth,
                                                 n=X.shape[0], dim=self.training_embeddings_.shape[1])
-                Ue = logsumexp(log_half_gaussian_mean(asymptotic_var=log_as_var) + np.log(mean_class_prob), axis=1)
-                Ua = np.min(f1_hat_y_x, axis=1)
-                Ue = np.clip(Ue, a_min=-1e40, a_max=None)
-                total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0)
+                Ue = log_half_gaussian_mean(asymptotic_var=log_as_var).squeeze()
+                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True).squeeze()
+                # Ue = np.clip(Ue, a_min=-1e40, a_max=None)
+                total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0).squeeze()
 
             if Ue_total.shape[0] == 0:
                 Ue_total = Ue

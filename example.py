@@ -48,8 +48,9 @@ if __name__ == '__main__':
     strategy = 'isj'
     # for i, uncertainty_type in enumerate(['aleatoric', 'epistemic', 'total']):
     precise_computation = True
+
     nuq = NuqClassifier(bandwidth=np.array([0.4, 0.4]), strategy=strategy.lower(), tune_bandwidth=True,
-                        precise_computation=precise_computation, n_neighbors=100, coeff=1e-10)
+                        precise_computation=precise_computation, n_neighbors=100, coeff=0.001)
     nuq.fit(X=X_train, y=y_train)
 
     ax[1].set_title('Classification')

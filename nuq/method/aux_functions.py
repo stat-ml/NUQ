@@ -80,16 +80,15 @@ def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, coeff
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
     if not precise_computation:
-        idx = np.argwhere(np.sum(weights, axis=1) > 0.)[:, 0]
-        f_hat = np.zeros((weights.shape[0], targets.shape[-1]))
-        f_hat[idx] = (np.sum(weights[idx] * targets[idx], axis=1) + coeff) / (np.sum(weights[idx], axis=1) + 2. * coeff)
+        f_hat = (np.sum(weights * targets, axis=1) + coeff) / (np.sum(weights, axis=1) + n_clasees * coeff)
         f1_hat = 1. - f_hat
         assert f_hat.shape == (weights.shape[0], targets.shape[-1])
+        assert f1_hat.shape == (weights.shape[0], targets.shape[-1])
     else:
         log_weights = weights
         f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, n_classes=n_clasees,
                                                    coeff=coeff)
-        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees - 1.) * coeff,
+        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees -1.) * coeff,
                                       n_classes=n_clasees,
                                       log_denomerator=log_denomerator)
 
@@ -106,7 +105,7 @@ def p_hat_x(weights, n, h, precise_computation, dim):
         weights = weights.reshape(1, -1)[..., None]
     # np.prod!! instead of np.mean
     if not precise_computation:
-        f_hat_x = np.sum(weights.squeeze(-1) / (n * np.mean(h)), axis=-1)
+        f_hat_x = np.sum(weights.squeeze(-1) / (n * np.prod(h)), axis=-1)
     else:
         log_weights = weights
         dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
@@ -123,7 +122,7 @@ def asymptotic_var(sigma_est, f_est, bandwidth, n):
     if len(f_est.shape) < 2:
         f_est = f_est[..., None]
     # np.prod!! instead of np.mean
-    return (sigma_est * np.sqrt(np.pi)) / (np.mean(bandwidth) * f_est * n + 1e-20)
+    return (sigma_est * np.sqrt(np.pi)) / (np.prod(bandwidth) * f_est * n + 1e-20)
 
 
 def log_asymptotic_var(log_sigma_est, log_f_est, bandwidth, n, dim):
@@ -132,10 +131,10 @@ def log_asymptotic_var(log_sigma_est, log_f_est, bandwidth, n, dim):
     dim_multiplier = dim if bandwidth.shape == () or bandwidth.shape == (1,) else 1.
     log_numerator = log_sigma_est + 0.5 * np.log(np.pi)
     log_denominator = np.log(n) + dim_multiplier * np.sum(np.log(bandwidth)) + log_f_est
-    broadcast_shape = (1, log_denominator.shape[0], log_denominator.shape[1])
-    log_denominator_safe = logsumexp(np.concatenate([log_denominator[None], -40 * np.ones(broadcast_shape)], axis=0),
-                                     axis=0)
-    return log_numerator - log_denominator_safe
+    # broadcast_shape = (1, log_denominator.shape[0], log_denominator.shape[1])
+    # log_denominator_safe = logsumexp(np.concatenate([log_denominator[None], -40 * np.ones(broadcast_shape)], axis=0),
+    #                                  axis=0)
+    return log_numerator - log_denominator  # - log_denominator_safe
 
 
 def half_gaussian_mean(asymptotic_var):
