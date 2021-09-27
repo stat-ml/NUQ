@@ -1,0 +1,7 @@
+hnswlib
+KDEpy
+matplotlib
+numpy
+pre-commit
+scikit-learn
+scipy
