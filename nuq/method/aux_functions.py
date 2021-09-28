@@ -2,6 +2,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.special import logsumexp
 from sklearn.datasets import make_blobs
+from sklearn.neighbors import NearestNeighbors
+
+
+class MyKNN():
+    def __init__(self, X):
+        self.knn = NearestNeighbors(n_neighbors=X.shape[0])
+        self.knn.fit(X)
+
+    def knn_query(self, X, k=None):
+        distances, indices = self.knn.kneighbors(X=X)
+        return indices, distances
 
 
 def plot_data(X, y):
@@ -39,10 +50,10 @@ def compute_centroids(embeddings, labels):
     return np.array(centers), np.array(lbls)
 
 
-def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_labels, n_neighbors, method='faiss'):
+def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_labels, n_neighbors, method='hnsw'):
     if len(current_embeddings.shape) < 2:
         current_embeddings = current_embeddings.reshape(1, -1)
-    if method == 'hnsw':
+    if method == 'hnsw' or method == 'all_data':
         indices, distances = knn.knn_query(current_embeddings, k=n_neighbors)
     elif method == 'faiss':
         distances, indices = knn.search(current_embeddings, k=n_neighbors)
@@ -52,7 +63,6 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
     selected_labels = training_labels[indices]
 
     w_raw = kernel(current_embeddings[:, None, :], selected_embeddings)[..., None]
-
     assert w_raw.shape == (current_embeddings.shape[0], n_neighbors, 1)
     return w_raw, selected_labels
 
@@ -111,10 +121,6 @@ def p_hat_x(weights, n, h, precise_computation, dim):
         # dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
         f_hat_x = -np.log(n) + logsumexp(log_weights, axis=1)
 
-    assert (
-        f_hat_x.shape[0] == weights.shape[0],
-        f"Received shapes are: f_hat shape is {f_hat_x.shape[0]} and weights shape is {weights.shape[0]}"
-    )
     return f_hat_x
 
 

@@ -7,7 +7,7 @@ from sklearn.utils.validation import check_X_y, check_is_fitted, check_array
 from .aux_functions import (
     get_kernel, compute_weights, get_nw_mean_estimate, p_hat_x,
     asymptotic_var, half_gaussian_mean, log_asymptotic_var,
-    log_half_gaussian_mean, compute_centroids
+    log_half_gaussian_mean, compute_centroids, MyKNN
 )
 from ..utils.bandwidth_selection import tune_kernel
 
@@ -64,6 +64,9 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             self.fast_knn.init_index(max_elements=self.training_embeddings_.shape[0])
             self.fast_knn.set_ef(10)
             self.fast_knn.add_items(self.training_embeddings_)
+        elif self.method == 'all_data':
+            self.n_neighbors = self.training_embeddings_.shape[0]
+            self.fast_knn = MyKNN(self.training_embeddings_)
         else:
             raise ValueError
 
