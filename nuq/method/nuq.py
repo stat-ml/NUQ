@@ -13,7 +13,7 @@ from ..utils.bandwidth_selection import tune_kernel
 
 
 class NuqClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.001, tune_bandwidth=True,
+    def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.00001, tune_bandwidth=True,
                  strategy='isj',
                  bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False):
         """
@@ -126,11 +126,19 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                 total_uncertainty = Ue + Ua
             else:
                 sigma_hat_est = np.max(f_hat_y_x + f1_hat_y_x, axis=1, keepdims=True)
+                broadcast_shape = (1, sigma_hat_est.shape[0], sigma_hat_est.shape[1])
+                sigma_hat_est = logsumexp(np.concatenate(
+                    [sigma_hat_est[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)],
+                    axis=0), axis=0)
                 log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
                                                 bandwidth=self.bandwidth,
                                                 n=X.shape[0], dim=self.training_embeddings_.shape[1])
                 Ue = log_half_gaussian_mean(asymptotic_var=log_as_var).squeeze()
-                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True).squeeze()
+                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True)
+                Ua = logsumexp(
+                    np.concatenate([Ua[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)], axis=0).squeeze(),
+                    axis=0)
+
                 # Ue = np.clip(Ue, a_min=-1e40, a_max=None)
                 total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0).squeeze()
 
