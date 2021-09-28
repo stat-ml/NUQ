@@ -118,8 +118,8 @@ def p_hat_x(weights, n, h, precise_computation, dim):
         f_hat_x = np.sum(weights.squeeze(-1) / ((np.pi ** (dim / 2)) * n * np.prod(h)), axis=-1)
     else:
         log_weights = weights
-        # dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
-        f_hat_x = -np.log(n) + logsumexp(log_weights, axis=1)
+        dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
+        f_hat_x = -np.log(n) - dim_multiplier * np.sum(np.log(h)) + logsumexp(log_weights, axis=1)
 
     return f_hat_x
 
