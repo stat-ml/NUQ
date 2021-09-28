@@ -39,6 +39,7 @@ def std_deviation_selection(X, y):
 
 
 def tune_kernel(X, y, knn=None, strategy="isj", constructor=None, precise_computation=True, n_neighbors=20):
+    
     if strategy == 'isj':
         bandwidth = (4. * X.shape[1]) * to_multidim(X=X, method=improved_sheather_jones)
 
