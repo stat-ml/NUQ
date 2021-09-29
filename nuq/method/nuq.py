@@ -110,6 +110,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         Ua_total = np.array([])
         Ut_total = np.array([])
         for batch in batches:
+            # import pdb
+            # pdb.set_trace()
             X_batch = X[batch[0]: batch[1]]
             f_hat_x_full = self.get_kde(X_batch, batch_size=batch_size)
             output = self.predict_proba(X_batch, batch_size=batch_size)
@@ -135,7 +137,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                     axis=0), axis=0)
                 log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
                                                 bandwidth=self.bandwidth,
-                                                n=X.shape[0], dim=self.training_embeddings_.shape[1])
+                                                n=self.n_neighbors, dim=self.training_embeddings_.shape[1])
                 Ue = log_half_gaussian_mean(asymptotic_var=log_as_var).squeeze()
                 Ua = np.min(f1_hat_y_x, axis=1, keepdims=True)
                 Ua = logsumexp(
@@ -178,6 +180,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                                               training_labels=self.training_labels_,
                                               n_neighbors=self.n_neighbors,
                                               method=self.method)
+            # import pdb
+            # pdb.set_trace()
             f_hat_x_current = p_hat_x(weights=weights, n=self.n_neighbors, h=self.bandwidth,
                                       dim=self.training_embeddings_.shape[1],
                                       precise_computation=self.precise_computation)
