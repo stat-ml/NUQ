@@ -41,10 +41,8 @@ def std_deviation_selection(X, y):
 def tune_kernel(X, y, knn=None, strategy="isj", constructor=None, precise_computation=True, n_neighbors=20):
     if strategy == 'isj':
         bandwidth = (4. * X.shape[1]) * to_multidim(X=X, method=improved_sheather_jones)
-
     elif strategy == 'silverman':
         bandwidth = X.shape[1] * to_multidim(X=X, method=silvermans_rule)
-
     elif strategy == 'std':
         bandwidth = np.mean(std_deviation_selection(X=X, y=y), axis=0)
     elif strategy == 'scott':

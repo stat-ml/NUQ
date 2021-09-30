@@ -34,9 +34,11 @@ def get_kernel(name='RBF', **kwargs):
         if len(bandwidth.shape) < 2:
             bandwidth = bandwidth[None]
         if not kwargs.get('precise_computation'):
-            return lambda x, y: np.exp(-np.sum(np.square(x - y) / (2 * bandwidth ** 2), axis=-1)) / np.sqrt(2 * np.pi)
+            return lambda x, y: np.exp(-np.sum(np.square(x - y) / (2 * bandwidth ** 2), axis=-1)) / np.sqrt(
+                2 * np.pi) ** x.shape[1]
         else:
-            return lambda x, y: -np.sum(np.square(x - y) / (2 * bandwidth ** 2), axis=-1) - 0.5 * np.log(2 * np.pi)
+            return lambda x, y: -np.sum(np.square((x - y) / bandwidth) / 2., axis=-1) - 0.5 * x.shape[-1] * np.log(
+                2 * np.pi)
     else:
         raise ValueError("Wrong kernel name")
 
@@ -63,6 +65,9 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
     selected_labels = training_labels[indices]
 
     w_raw = kernel(current_embeddings[:, None, :], selected_embeddings)[..., None]
+
+    # import pdb
+    # pdb.set_trace()
     assert w_raw.shape == (current_embeddings.shape[0], n_neighbors, 1)
     return w_raw, selected_labels
 
