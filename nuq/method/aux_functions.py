@@ -48,18 +48,22 @@ def get_kernel(name='RBF', **kwargs):
                 2 * np.pi)
     if name == 'logistic':
         if not kwargs.get('precise_computation'):
-            return multipliers[name], lambda x, y: np.prod(1 / (np.exp(x - y) + np.exp(y - x) + 2), axis=-1)
+            return multipliers[name], lambda x, y: np.prod(
+                1 / (np.exp((x - y) / bandwidth) + np.exp((x - y) / bandwidth) + 2), axis=-1)
         else:
             return multipliers[name], lambda x, y: -np.sum(
                 logsumexp(np.concatenate(
-                    [(x - y)[None], (y - x)[None], np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
+                    [((x - y) / bandwidth)[None], ((x - y) / bandwidth)[None],
+                     np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
                     axis=0), axis=0), axis=-1)
     if name == 'sigmoid':
         if not kwargs.get('precise_computation'):
-            return multipliers[name], lambda x, y: np.prod(2 / (np.pi * (np.exp(x - y) + np.exp(y - x))), axis=-1)
+            return multipliers[name], lambda x, y: np.prod(
+                2 / (np.pi * (np.exp((x - y) / bandwidth) + np.exp((x - y) / bandwidth))), axis=-1)
         else:
             return multipliers[name], lambda x, y: x.shape[-1] * np.log(2 / np.pi) - np.sum(
-                logsumexp(np.concatenate([(x - y)[None], (y - x)[None]], axis=0), axis=0), axis=-1)
+                logsumexp(np.concatenate([((x - y) / bandwidth)[None], ((x - y) / bandwidth)[None]], axis=0), axis=0),
+                axis=-1)
     else:
         raise ValueError("Wrong kernel name")
 

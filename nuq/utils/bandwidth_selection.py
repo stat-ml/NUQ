@@ -27,6 +27,7 @@ def classification_selection(X, y, knn, constructor, precise_computation, n_neig
     print('Best accuracy ', gs.best_score_)
     return gs.best_params_['bandwidth']
 
+
 def std_deviation_selection(X, y):
     stds = []
     for c in np.unique(y):
@@ -40,7 +41,7 @@ def std_deviation_selection(X, y):
 
 def tune_kernel(X, y, knn=None, strategy="isj", constructor=None, precise_computation=True, n_neighbors=20):
     if strategy == 'isj':
-        bandwidth = to_multidim(X=X, method=improved_sheather_jones)
+        bandwidth = (4 * X.shape[1]) * to_multidim(X=X, method=improved_sheather_jones)
     elif strategy == 'silverman':
         bandwidth = X.shape[1] * to_multidim(X=X, method=silvermans_rule)
     elif strategy == 'std':
