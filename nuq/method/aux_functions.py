@@ -29,16 +29,37 @@ def make_data(total_size=5000, centers=np.array([[-4., -4.], [0., 4.]])):
 
 
 def get_kernel(name='RBF', **kwargs):
+    multipliers = {
+        'RBF': 1 / (2 * np.sqrt(np.pi)),
+        'logistic': 1 / 6.,
+        'sigmoid': 2 / np.pi ** 2
+    }
     if name == 'RBF':
         bandwidth = kwargs.get('bandwidth', np.array([[1., ]]))
         if len(bandwidth.shape) < 2:
             bandwidth = bandwidth[None]
         if not kwargs.get('precise_computation'):
-            return lambda x, y: np.exp(-np.sum(np.square(x - y) / (2 * bandwidth ** 2), axis=-1)) / np.sqrt(
+            return multipliers[name], lambda x, y: np.exp(
+                -np.sum(np.square(x - y) / (2 * bandwidth ** 2), axis=-1)) / np.sqrt(
                 2 * np.pi) ** x.shape[1]
         else:
-            return lambda x, y: -np.sum(np.square((x - y) / bandwidth) / 2., axis=-1) - 0.5 * x.shape[-1] * np.log(
+            return multipliers[name], lambda x, y: -np.sum(np.square((x - y) / bandwidth) / 2., axis=-1) - 0.5 * \
+                                                   x.shape[-1] * np.log(
                 2 * np.pi)
+    if name == 'logistic':
+        if not kwargs.get('precise_computation'):
+            return multipliers[name], lambda x, y: np.prod(1 / (np.exp(x - y) + np.exp(y - x) + 2), axis=-1)
+        else:
+            return multipliers[name], lambda x, y: -np.sum(
+                logsumexp(np.concatenate(
+                    [(x - y)[None], (y - x)[None], np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
+                    axis=0), axis=0), axis=-1)
+    if name == 'sigmoid':
+        if not kwargs.get('precise_computation'):
+            return multipliers[name], lambda x, y: np.prod(2 / (np.pi * (np.exp(x - y) + np.exp(y - x))), axis=-1)
+        else:
+            return multipliers[name], lambda x, y: x.shape[-1] * np.log(2 / np.pi) - np.sum(
+                logsumexp(np.concatenate([(x - y)[None], (y - x)[None]], axis=0), axis=0), axis=-1)
     else:
         raise ValueError("Wrong kernel name")
 
@@ -66,31 +87,35 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
 
     w_raw = kernel(current_embeddings[:, None, :], selected_embeddings)[..., None]
 
-    # import pdb
-    # pdb.set_trace()
     assert w_raw.shape == (current_embeddings.shape[0], n_neighbors, 1)
     return w_raw, selected_labels
 
 
-def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=None):
+def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=None, use_uniform_prior=False):
     log_numerator_pre = logsumexp(log_weights, axis=1, b=targets)
-    # broadcast_shape = (1, log_numerator_pre.shape[0], log_numerator_pre.shape[1])
-    # concated_array = np.concatenate([log_numerator_pre[None], np.log(coeff) * np.ones(shape=broadcast_shape)],
-    #                                 axis=0)
-    log_numerator = log_numerator_pre  # logsumexp(concated_array, axis=0)
+    if use_uniform_prior:
+        broadcast_shape = (1, log_numerator_pre.shape[0], log_numerator_pre.shape[1])
+        concated_array = np.concatenate([log_numerator_pre[None], np.log(coeff) * np.ones(shape=broadcast_shape)],
+                                        axis=0)
+        log_numerator = logsumexp(concated_array, axis=0)
+    else:
+        log_numerator = log_numerator_pre
 
     if log_denomerator is None:
         log_denomerator_pre = logsumexp(log_weights, axis=1)
-        # broadcast_shape = (1, log_denomerator_pre.shape[0], log_denomerator_pre.shape[1])
-        # concated_array = np.concatenate(
-        #     [log_denomerator_pre[None], np.log(n_classes * coeff) * np.ones(shape=broadcast_shape)],
-        #     axis=0)
-        log_denomerator = log_denomerator_pre  # logsumexp(concated_array, axis=0)
+        if use_uniform_prior:
+            broadcast_shape = (1, log_denomerator_pre.shape[0], log_denomerator_pre.shape[1])
+            concated_array = np.concatenate(
+                [log_denomerator_pre[None], np.log(n_classes * coeff) * np.ones(shape=broadcast_shape)],
+                axis=0)
+            log_denomerator = logsumexp(concated_array, axis=0)
+        else:
+            log_denomerator = log_denomerator_pre
     f_hat = log_numerator - log_denomerator
     return f_hat, log_denomerator
 
 
-def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, coeff=1.):
+def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, use_uniform_prior, coeff=1.):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
@@ -101,11 +126,12 @@ def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, coeff
         assert f1_hat.shape == (weights.shape[0], targets.shape[-1])
     else:
         log_weights = weights
+
         f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, n_classes=n_clasees,
-                                                   coeff=coeff)
+                                                   coeff=coeff, use_uniform_prior=use_uniform_prior)
         f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees - 1.) * coeff,
                                       n_classes=n_clasees,
-                                      log_denomerator=log_denomerator)
+                                      log_denomerator=log_denomerator, use_uniform_prior=use_uniform_prior)
 
         assert f_hat.shape == (log_weights.shape[0], targets.shape[-1])
         assert f1_hat.shape == (log_weights.shape[0], targets.shape[-1])
@@ -136,11 +162,11 @@ def asymptotic_var(sigma_est, f_est, bandwidth, n):
     return (sigma_est * np.sqrt(np.pi)) / (np.prod(bandwidth) * f_est * n + 1e-20)
 
 
-def log_asymptotic_var(log_sigma_est, log_f_est, bandwidth, n, dim):
+def log_asymptotic_var(log_sigma_est, log_f_est, bandwidth, n, dim, squared_kernel_int):
     if len(log_f_est.shape) < 2:
         log_f_est = log_f_est[..., None]
     dim_multiplier = dim if bandwidth.shape == () or bandwidth.shape == (1,) else 1.
-    log_numerator = log_sigma_est - dim * (np.log(2.) + 0.5 * np.log(np.pi))
+    log_numerator = log_sigma_est + dim * squared_kernel_int
     log_denominator = np.log(n) + dim_multiplier * np.sum(np.log(bandwidth)) + log_f_est
     # broadcast_shape = (1, log_denominator.shape[0], log_denominator.shape[1])
     # log_denominator_safe = logsumexp(np.concatenate([log_denominator[None], -40 * np.ones(broadcast_shape)], axis=0),
