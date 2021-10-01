@@ -34,8 +34,8 @@ def get_kernel(name='RBF', **kwargs):
         'logistic': 1 / 6.,
         'sigmoid': 2 / np.pi ** 2
     }
+    bandwidth = kwargs.get('bandwidth', np.array([[1., ]]))
     if name == 'RBF':
-        bandwidth = kwargs.get('bandwidth', np.array([[1., ]]))
         if len(bandwidth.shape) < 2:
             bandwidth = bandwidth[None]
         if not kwargs.get('precise_computation'):
@@ -49,21 +49,32 @@ def get_kernel(name='RBF', **kwargs):
     if name == 'logistic':
         if not kwargs.get('precise_computation'):
             return multipliers[name], lambda x, y: np.prod(
-                1 / (np.exp((x - y) / bandwidth) + np.exp((x - y) / bandwidth) + 2), axis=-1)
+                1 / (np.exp((x - y) / bandwidth) + np.exp(-(x - y) / bandwidth) + 2), axis=-1)
         else:
-            return multipliers[name], lambda x, y: -np.sum(
-                logsumexp(np.concatenate(
-                    [((x - y) / bandwidth)[None], ((x - y) / bandwidth)[None],
-                     np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
-                    axis=0), axis=0), axis=-1)
+            def log_logistic_kernel(x, y):
+                diff = x - y
+                output = -np.sum(
+                    logsumexp(np.concatenate(
+                        [(diff / bandwidth)[None], (-diff / bandwidth)[None],
+                         np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
+                        axis=0), axis=0), axis=-1)
+                return output
+
+            return multipliers[name], log_logistic_kernel
     if name == 'sigmoid':
         if not kwargs.get('precise_computation'):
             return multipliers[name], lambda x, y: np.prod(
                 2 / (np.pi * (np.exp((x - y) / bandwidth) + np.exp((x - y) / bandwidth))), axis=-1)
         else:
-            return multipliers[name], lambda x, y: x.shape[-1] * np.log(2 / np.pi) - np.sum(
-                logsumexp(np.concatenate([((x - y) / bandwidth)[None], ((x - y) / bandwidth)[None]], axis=0), axis=0),
-                axis=-1)
+            def log_sigmoid_function(x, y):
+                diff = x - y
+                output = x.shape[-1] * np.log(2 / np.pi) - np.sum(
+                    logsumexp(np.concatenate([(diff / bandwidth)[None],
+                                              (-diff / bandwidth)[None]], axis=0),
+                              axis=0),
+                    axis=-1)
+                return output
+            return multipliers[name], log_sigmoid_function
     else:
         raise ValueError("Wrong kernel name")
 

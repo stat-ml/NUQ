@@ -15,7 +15,7 @@ from ..utils.bandwidth_selection import tune_kernel
 class NuqClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.00001, tune_bandwidth=True,
                  strategy='isj',
-                 bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=False):
+                 bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=True):
         """
 
         :param kernel_type:
@@ -151,11 +151,9 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                 Ua = np.min(f1_hat_y_x, axis=1, keepdims=True)
                 if not self.use_uniform_prior:
                     Ua = logsumexp(
-                        np.concatenate([Ua[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)],
-                                       axis=0).squeeze(),
+                        np.concatenate([Ua[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)], axis=0),
                         axis=0)
-                else:
-                    Ua = Ua.squeeze()
+                Ua = Ua.squeeze()
 
                 # Ue = np.clip(Ue, a_min=-1e40, a_max=None)
 

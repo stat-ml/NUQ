@@ -49,14 +49,14 @@ if __name__ == '__main__':
     # for i, uncertainty_type in enumerate(['aleatoric', 'epistemic', 'total']):
     precise_computation = True
 
-    nuq = NuqClassifier(bandwidth=np.array([0.4, 0.4]),
+    nuq = NuqClassifier(bandwidth=np.array([0.1, 0.1]),
                         strategy=strategy.lower(),
-                        tune_bandwidth=True,
+                        tune_bandwidth=False,
                         precise_computation=precise_computation,
                         n_neighbors=30,
                         coeff=0.00001,
-                        use_uniform_prior=False,
-                        kernel_type='logistic'
+                        use_uniform_prior=True,
+                        kernel_type='sigmoid'
                         )
     nuq.fit(X=X_train, y=y_train)
 
