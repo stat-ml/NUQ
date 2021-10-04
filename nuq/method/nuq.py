@@ -13,15 +13,15 @@ from ..utils.bandwidth_selection import tune_kernel
 
 
 class NuqClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.00001, tune_bandwidth=True,
+    def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, tune_bandwidth=True,
                  strategy='isj',
-                 bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=True):
+                 bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=True,
+                 max_distance=None):
         """
 
         :param kernel_type:
         :param method:
         :param n_neighbors:
-        :param coeff: correction, which is added to numenator and denominator (relevant for precise_computation=False)
         :param tune_bandwidth: whether tune bandwidth, of use fixed
         :param strategy: tuning strategy. Options are ['isj', 'silverman', 'scott', 'classification']
         :param bandwidth: bandwidth. Should be a numpy array of size () or (dim, )
@@ -32,13 +32,13 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.use_uniform_prior = use_uniform_prior
         self.tune_bandwidth = tune_bandwidth
         self.strategy = strategy
-        self.coeff = coeff
         self.kernel_type = kernel_type
         self.bandwidth = bandwidth
         self.method = method
         self.precise_computation = precise_computation
         self.n_neighbors = n_neighbors
         self.use_centroids = use_centroids
+        self.max_distance = max_distance
 
     def fit(self, X, y):
         """
@@ -47,6 +47,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         :param y: Training labels
         :return: trained model
         """
+        if not isinstance(self.bandwidth, np.ndarray) or self.bandwidth.shape == ():
+            self.bandwidth = np.array([self.bandwidth])
         X, y = check_X_y(X, y)
         self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
                                                           precise_computation=self.precise_computation)
@@ -74,14 +76,21 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         else:
             raise ValueError
 
+        indices, distances = self.fast_knn.knn_query(X, k=self.n_neighbors)
+        mean_distances = distances.mean(0)
+        max_dist = np.max(distances) * np.ones_like(X[:1])
         if self.tune_bandwidth:
             self.bandwidth = tune_kernel(X=self.training_embeddings_, y=y, strategy=self.strategy, knn=self.fast_knn,
                                          constructor=NuqClassifier, precise_computation=self.precise_computation,
-                                         n_neighbors=self.n_neighbors)
+                                         n_neighbors=self.n_neighbors, use_centroids=self.use_centroids,
+                                         kernel_type=self.kernel_type,
+                                         use_uniform_prior=self.use_uniform_prior, mean_distances=mean_distances)
             self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
                                                               precise_computation=self.precise_computation)
             if self.precise_computation:
                 self.squared_kernel_int = np.log(self.squared_kernel_int)
+
+        self.coeff = self.kernel(2. * max_dist, np.zeros_like(max_dist))
         return self
 
     def _get_nw_estimates(self, X, batch_size):
@@ -96,7 +105,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                                                        training_labels=self.training_labels_,
                                                        n_neighbors=self.n_neighbors,
                                                        method=self.method)
-
             output = get_nw_mean_estimate(targets=selected_labels, weights=weights, coeff=self.coeff,
                                           precise_computation=self.precise_computation, n_clasees=self.n_classes,
                                           use_uniform_prior=self.use_uniform_prior)
@@ -137,10 +145,11 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                 total_uncertainty = Ue + Ua
             else:
                 sigma_hat_est = np.max(f_hat_y_x + f1_hat_y_x, axis=1, keepdims=True)
+
                 if not self.use_uniform_prior:
                     broadcast_shape = (1, sigma_hat_est.shape[0], sigma_hat_est.shape[1])
                     sigma_hat_est = logsumexp(np.concatenate(
-                        [sigma_hat_est[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)],
+                        [sigma_hat_est[None], self.coeff * np.ones(shape=broadcast_shape)],
                         axis=0), axis=0)
                 log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
                                                 bandwidth=self.bandwidth,
@@ -149,12 +158,12 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
                 Ue = log_half_gaussian_mean(asymptotic_var=log_as_var).squeeze()
                 Ua = np.min(f1_hat_y_x, axis=1, keepdims=True)
+
                 if not self.use_uniform_prior:
                     Ua = logsumexp(
-                        np.concatenate([Ua[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)], axis=0),
+                        np.concatenate([Ua[None], self.coeff * np.ones(shape=broadcast_shape)], axis=0),
                         axis=0)
                 Ua = Ua.squeeze()
-
                 # Ue = np.clip(Ue, a_min=-1e40, a_max=None)
 
                 total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0).squeeze()

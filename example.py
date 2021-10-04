@@ -45,18 +45,17 @@ if __name__ == '__main__':
     # strategy options: 'isj', 'silverman', 'scott', 'classification'
     # uncertainty type options: 'aleatoric', 'epistemic', 'total'
     uncertainty_type = "aleatoric"
-    strategy = 'std'
+    strategy = 'isj'
     # for i, uncertainty_type in enumerate(['aleatoric', 'epistemic', 'total']):
     precise_computation = True
 
     nuq = NuqClassifier(bandwidth=np.array([0.1, 0.1]),
                         strategy=strategy.lower(),
-                        tune_bandwidth=False,
+                        tune_bandwidth=True,
                         precise_computation=precise_computation,
                         n_neighbors=30,
-                        coeff=0.00001,
                         use_uniform_prior=True,
-                        kernel_type='sigmoid'
+                        kernel_type='RBF'
                         )
     nuq.fit(X=X_train, y=y_train)
 
@@ -81,7 +80,7 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.show()
 
-    plt.figure()
-    uncertainty = nuq.predict_uncertainty(X_test)
-    plt.contourf(xx, yy, uncertainty['aleatoric'].reshape(*xx.shape))
-    plt.show()
+    # plt.figure()
+    # uncertainty = nuq.predict_uncertainty(X_test)
+    # plt.contourf(xx, yy, uncertainty['aleatoric'].reshape(*xx.shape))
+    # plt.show()

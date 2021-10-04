@@ -56,7 +56,7 @@ def get_kernel(name='RBF', **kwargs):
                 output = -np.sum(
                     logsumexp(np.concatenate(
                         [(diff / bandwidth)[None], (-diff / bandwidth)[None],
-                         np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
+                         np.log(2) * np.ones((1, *diff.shape))],
                         axis=0), axis=0), axis=-1)
                 return output
 
@@ -74,6 +74,7 @@ def get_kernel(name='RBF', **kwargs):
                               axis=0),
                     axis=-1)
                 return output
+
             return multipliers[name], log_sigmoid_function
     else:
         raise ValueError("Wrong kernel name")
@@ -106,11 +107,11 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
     return w_raw, selected_labels
 
 
-def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=None, use_uniform_prior=False):
+def compute_logsumexp(log_weights, targets, log_coeff, n_classes, log_denomerator=None, use_uniform_prior=False):
     log_numerator_pre = logsumexp(log_weights, axis=1, b=targets)
     if use_uniform_prior:
         broadcast_shape = (1, log_numerator_pre.shape[0], log_numerator_pre.shape[1])
-        concated_array = np.concatenate([log_numerator_pre[None], np.log(coeff) * np.ones(shape=broadcast_shape)],
+        concated_array = np.concatenate([log_numerator_pre[None], log_coeff * np.ones(shape=broadcast_shape)],
                                         axis=0)
         log_numerator = logsumexp(concated_array, axis=0)
     else:
@@ -121,7 +122,7 @@ def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=No
         if use_uniform_prior:
             broadcast_shape = (1, log_denomerator_pre.shape[0], log_denomerator_pre.shape[1])
             concated_array = np.concatenate(
-                [log_denomerator_pre[None], np.log(n_classes * coeff) * np.ones(shape=broadcast_shape)],
+                [log_denomerator_pre[None], (np.log(n_classes) + log_coeff) * np.ones(shape=broadcast_shape)],
                 axis=0)
             log_denomerator = logsumexp(concated_array, axis=0)
         else:
@@ -130,7 +131,7 @@ def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=No
     return f_hat, log_denomerator
 
 
-def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, use_uniform_prior, coeff=1.):
+def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, use_uniform_prior, coeff):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
@@ -141,10 +142,12 @@ def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, use_u
         assert f1_hat.shape == (weights.shape[0], targets.shape[-1])
     else:
         log_weights = weights
+        log_coeff = coeff
 
         f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, n_classes=n_clasees,
-                                                   coeff=coeff, use_uniform_prior=use_uniform_prior)
-        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees - 1.) * coeff,
+                                                   log_coeff=log_coeff, use_uniform_prior=use_uniform_prior)
+        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets,
+                                      log_coeff=np.log(n_clasees - 1.) + log_coeff,
                                       n_classes=n_clasees,
                                       log_denomerator=log_denomerator, use_uniform_prior=use_uniform_prior)
 
