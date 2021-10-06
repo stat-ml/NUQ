@@ -1,2 +1,1 @@
-from .method import *
-from .utils import *
+from .nuq_classifier import NuqClassifier

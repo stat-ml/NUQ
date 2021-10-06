@@ -18,16 +18,8 @@ def get_kernel(name="RBF", **kwargs):
         [Callable]: kernel function
     """
     if name == "RBF":
-        bandwidth = kwargs.get(
-            "bandwidth",
-            np.array(
-                [
-                    [
-                        1.0,
-                    ]
-                ]
-            ),
-        )
+        scale = np.ones(shape=(1, 1))
+        bandwidth = kwargs.get("bandwidth", scale)
         if len(bandwidth.shape) < 2:
             bandwidth = bandwidth[None]
         if not kwargs.get("precise_computation"):
@@ -40,115 +32,6 @@ def get_kernel(name="RBF", **kwargs):
             )
     else:
         raise ValueError(f"Unsupported kernel: {name}")
-
-
-def get_log_kernel(name="RBF", *args, **kwargs):
-    """Constructs kernel function with signature:
-    f(d: [N]) -> values [N]
-      * d: array of so-called distances (euclidean, l2, cosine, ...)
-           to be used as kernel arguments
-      * values: -//-
-
-    Args:
-        name (str, optional): kernel type. Defaults to "RBF".
-
-    Raises:
-        ValueError: if `name` is unsupported
-
-    Returns:
-        [Callable]: kernel function
-    """
-    if name == "RBF":
-        bandwidth = kwargs.get(
-            "bandwidth",
-            np.array(
-                [
-                    [
-                        1.0,
-                    ]
-                ]
-            ),
-        )
-        if len(bandwidth.shape) < 2:
-            bandwidth = bandwidth[None]
-        return lambda d: -d / bandwidth ** 2
-    else:
-        raise ValueError(f"Unsupported kernel: {name}")
-
-
-def compute_centroids(embeddings, labels):
-    """Computes centroid for each class.
-
-    Args:
-        embeddings ([type]): embeddings
-        labels ([type]): labels (1..n_classes)
-
-    Returns:
-        centers ([type]): -//-
-        labels ([type]): -//-
-    """
-    centers, lbls = [], []
-    for c in np.unique(labels):
-        mask = labels == c
-        centers.append(np.mean(embeddings[mask], axis=0))
-        lbls.append(c)
-    return np.array(centers), np.array(lbls)
-
-
-def compute_weights(
-    knn,
-    kernel,
-    current_embeddings,
-    train_embeddings,
-    training_labels,
-    n_neighbors,
-    method="faiss",
-):
-    """Finds k = `n_neighbors` nearest neighbours for `current_embeddings` among
-    `train_embeddings` and computes the `kernel` function for each pair
-
-    Args:
-        knn ([type]): object for nearest neighbours search
-                      (FIX: depends on `method`)
-        kernel ([type]): vectorized kernel function f(X_1, X_2)
-                         (FIX: recomputes distances already available from kNN)
-        current_embeddings ([type]): query embeddings
-        train_embeddings ([type]): base embeddings
-                                   (FIX: already loaded into knn)
-        training_labels ([type]): corresponding labels
-        n_neighbors ([type]): number of neighbours to compute weights for
-        method (str, optional): kNN index type (FIX: available from `knn`).
-                                Defaults to 'faiss'.
-
-    Raises:
-        ValueError: if `method` is not supported
-
-    Returns:
-        w_raw ([type]): weights matrix
-        selected_labels ([type]): corresponding labels
-    """
-    if len(current_embeddings.shape) < 2:
-        current_embeddings = current_embeddings.reshape(1, -1)
-    if method == "hnsw":
-        indices, distances = knn.knn_query(current_embeddings, k=n_neighbors)
-    elif method == "faiss":
-        distances, indices = knn.search(current_embeddings, k=n_neighbors)
-    else:
-        raise ValueError
-    selected_embeddings = train_embeddings[indices]
-    selected_labels = training_labels[indices]
-
-    # ####
-    # selected_embeddings = train_embeddings
-    # selected_labels = np.repeat(training_labels[None], training_labels.shape[0], axis=0)
-    # # ####
-
-    w_raw = kernel(current_embeddings[:, None, :], selected_embeddings)[
-        ..., None
-    ]
-
-    assert w_raw.shape == (current_embeddings.shape[0], n_neighbors, 1)
-    return w_raw, selected_labels
 
 
 def compute_logsumexp(log_weights, targets, coeff, log_denomerator=None):
