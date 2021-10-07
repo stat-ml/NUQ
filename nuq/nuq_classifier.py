@@ -31,6 +31,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         use_centroids=False,
         sparse=False,
         verbose=False,
+        n_jobs=-1,
     ):
         """
 
@@ -54,6 +55,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.use_centroids = use_centroids
         self.sparse = sparse
         self.verbose = verbose
+        self.n_jobs = n_jobs
 
     @staticmethod
     def compute_centroids(embeddings, labels):
@@ -120,6 +122,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             n_neighbors=knn_max,
             verbose=False,
             sparse=True,
+            n_jobs=1,
         )
         grid = np.linspace(
             distances[:, 1].mean(), distances[:, -1].mean(), n_points
@@ -129,7 +132,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             param_grid={"bandwidth": grid},
             scoring="accuracy",
             cv=cv,
-            n_jobs=None,
+            n_jobs=-1,
             verbose=verbose,
         )
         gs.fit(self.X_, self.y_)
@@ -332,7 +335,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         ps = []
         log_sigma2_totals = []
 
-        res = Parallel(n_jobs=-1)(
+        res = Parallel(n_jobs=self.n_jobs)(
             delayed(self.predict_proba_single_)(
                 X[i, :], return_uncertainty=return_uncertainty
             )
