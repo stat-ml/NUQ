@@ -220,10 +220,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         return self
 
-    def predict_proba_single_(self, X, return_uncertainty=False):
-        idx, _ = self.index.knn_query(X, k=self.n_neighbors)
-        idx = idx[0, :]
-
+    def predict_proba_single_(self, idx, X, return_uncertainty=False):
         classes_cur, encoded = np.unique(self.y_[idx], return_inverse=True)
 
         log_kernel = self.log_kernel_(self.X_[idx, :], X)
@@ -331,13 +328,18 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         check_is_fitted(self)
         X = check_array(X)
 
+        if self.method == "hnsw":
+            I, _ = self.index.knn_query(X, k=self.n_neighbors)
+        else:
+            raise ValueError(f"Unsupported method: {self.method}")
+
         classes = []
         ps = []
         log_sigma2_totals = []
 
         res = Parallel(n_jobs=self.n_jobs)(
             delayed(self.predict_proba_single_)(
-                X[i, :], return_uncertainty=return_uncertainty
+                I[i, :], X[i, :], return_uncertainty=return_uncertainty
             )
             for i in tqdm(range(X.shape[0]), disable=not self.verbose)
         )
