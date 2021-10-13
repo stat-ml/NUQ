@@ -155,6 +155,36 @@ def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, use_u
         "f1_hat": f1_hat
     }
 
+def get_nw_mean_estimate_regerssion(targets, weights, precise_computation):
+    if len(weights.shape) < 2:
+        weights = weights.reshape(1, -1)[..., None]
+    assert weights.shape[1] == targets.shape[1]
+    if not precise_computation:
+        denominator = (np.sum(weights, axis=1) + 1e-18)
+        f_hat = (np.sum(weights * targets, axis=1)) / denominator
+        f_sq_hat = np.sum(weights * targets ** 2, axis=1) / denominator
+        assert f_hat.shape == (weights.shape[0], targets.shape[-1])
+        assert f_sq_hat.shape == (weights.shape[0], targets.shape[-1])
+    else:
+        """
+        kernel is logarithmed yet
+        """
+        log_weights = weights
+
+        log_denominator = logsumexp(log_weights)
+        log_numerator_lin = logsumexp(log_weights, b=targets)
+        log_numerator_sq = logsumexp(log_weights, b = targets ** 2)
+
+        f_hat = np.exp(log_numerator_lin - log_denominator)
+        f_sq_hat = np.exp(log_numerator_sq - log_denominator)
+
+    return {
+        "f_hat": f_hat,
+        "f_sq_hat": f_sq_hat
+    }
+
+
+
 
 def p_hat_x(weights, n, h, precise_computation, dim):
     if len(weights.shape) < 2:
