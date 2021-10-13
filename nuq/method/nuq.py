@@ -1,7 +1,7 @@
 import hnswlib
 import numpy as np
 from scipy.special import logsumexp
-from sklearn.base import BaseEstimator, ClassifierMixin, Re
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.validation import check_X_y, check_is_fitted, check_array
 
 from .aux_functions import (
