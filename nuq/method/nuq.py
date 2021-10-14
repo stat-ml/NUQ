@@ -1,36 +1,21 @@
 import hnswlib
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.special import logsumexp
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.datasets import make_blobs
 from sklearn.utils.validation import check_X_y, check_is_fitted, check_array
 
-from .compute_expectations import (
+from .aux_functions import (
     get_kernel, compute_weights, get_nw_mean_estimate, p_hat_x,
     asymptotic_var, half_gaussian_mean, log_asymptotic_var,
-    log_half_gaussian_mean, compute_centroids
+    log_half_gaussian_mean, compute_centroids, MyKNN
 )
 from ..utils.bandwidth_selection import tune_kernel
 
 
-def plot_data(X, y):
-    plt.close()
-    plt.figure()
-    plt.scatter(X[:, 0], X[:, 1], c=y)
-    plt.tight_layout()
-    plt.show()
-
-
-def make_data(total_size=5000, centers=np.array([[-4., -4.], [0., 4.]])):
-    X, y = make_blobs(n_samples=total_size, n_features=2, centers=centers)
-    return X, y
-
-
 class NuqClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.001, tune_bandwidth=True,
+    def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.00001, tune_bandwidth=True,
                  strategy='isj',
-                 bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False):
+                 bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=True):
         """
 
         :param kernel_type:
@@ -42,7 +27,9 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         :param bandwidth: bandwidth. Should be a numpy array of size () or (dim, )
         :param precise_computation: if True, everything is computed in terms of log
         :param use_centroids: whether use centroids or not
+        :param use_uniform_prior: If true, we induce prior that at infinity we predict uniform distribution over classes
         """
+        self.use_uniform_prior = use_uniform_prior
         self.tune_bandwidth = tune_bandwidth
         self.strategy = strategy
         self.coeff = coeff
@@ -61,10 +48,10 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         :return: trained model
         """
         X, y = check_X_y(X, y)
-        self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
-                                 precise_computation=self.precise_computation)
-        # if self.bandwidth.shape != X.shape[1]:
-        #     self.bandwidth = self.bandwidth.repeat(X.shape[1])
+        self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
+                                                          precise_computation=self.precise_computation)
+        if self.precise_computation:
+            self.squared_kernel_int = np.log(self.squared_kernel_int)
         targets = y.reshape(-1)
         if not self.use_centroids:
             y_ohe = np.eye(np.max(y) + 1)[targets]
@@ -74,12 +61,16 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         self.training_embeddings_ = X
         self.training_labels_ = y_ohe
+        self.n_classes = len(np.unique(y))
 
         if self.method == 'hnsw':
             self.fast_knn = hnswlib.Index(space='l2', dim=self.training_embeddings_.shape[1])
             self.fast_knn.init_index(max_elements=self.training_embeddings_.shape[0])
             self.fast_knn.set_ef(10)
             self.fast_knn.add_items(self.training_embeddings_)
+        elif self.method == 'all_data':
+            self.n_neighbors = self.training_embeddings_.shape[0]
+            self.fast_knn = MyKNN(self.training_embeddings_)
         else:
             raise ValueError
 
@@ -87,8 +78,10 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             self.bandwidth = tune_kernel(X=self.training_embeddings_, y=y, strategy=self.strategy, knn=self.fast_knn,
                                          constructor=NuqClassifier, precise_computation=self.precise_computation,
                                          n_neighbors=self.n_neighbors)
-            self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
-                                     precise_computation=self.precise_computation)
+            self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
+                                                              precise_computation=self.precise_computation)
+            if self.precise_computation:
+                self.squared_kernel_int = np.log(self.squared_kernel_int)
         return self
 
     def _get_nw_estimates(self, X, batch_size):
@@ -103,8 +96,10 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                                                        training_labels=self.training_labels_,
                                                        n_neighbors=self.n_neighbors,
                                                        method=self.method)
+
             output = get_nw_mean_estimate(targets=selected_labels, weights=weights, coeff=self.coeff,
-                                          precise_computation=self.precise_computation)
+                                          precise_computation=self.precise_computation, n_clasees=self.n_classes,
+                                          use_uniform_prior=self.use_uniform_prior)
 
             current_f_hat = output["f_hat"]
             current_f1_hat = output["f1_hat"]
@@ -119,7 +114,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
     def predict_uncertainty(self, X, batch_size=50000):
         batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
-        mean_class_prob = np.mean(self.training_labels_, axis=0, keepdims=True)
         Ue_total = np.array([])
         Ua_total = np.array([])
         Ut_total = np.array([])
@@ -134,22 +128,36 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             f_hat_y_x = f_hat_y_x_full
             f1_hat_y_x = f1_hat_y_x_full
             if not self.precise_computation:
-                sigma_hat_est = f_hat_y_x * f1_hat_y_x
+                sigma_hat_est = np.max(f_hat_y_x * f1_hat_y_x, axis=1, keepdims=True)
                 as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
                                         n=self.n_neighbors)
 
-                Ue = np.sum(half_gaussian_mean(asymptotic_var=as_var) * mean_class_prob, axis=1)
-                Ua = np.sum(np.minimum(f_hat_y_x, f1_hat_y_x) * mean_class_prob, axis=1)
+                Ue = half_gaussian_mean(asymptotic_var=as_var).squeeze()
+                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True).squeeze()
                 total_uncertainty = Ue + Ua
             else:
-                sigma_hat_est = f_hat_y_x + f1_hat_y_x
+                sigma_hat_est = np.max(f_hat_y_x + f1_hat_y_x, axis=1, keepdims=True)
+                if not self.use_uniform_prior:
+                    broadcast_shape = (1, sigma_hat_est.shape[0], sigma_hat_est.shape[1])
+                    sigma_hat_est = logsumexp(np.concatenate(
+                        [sigma_hat_est[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)],
+                        axis=0), axis=0)
                 log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
                                                 bandwidth=self.bandwidth,
-                                                n=X.shape[0], dim=self.training_embeddings_.shape[1])
-                Ue = logsumexp(log_half_gaussian_mean(asymptotic_var=log_as_var) + np.log(mean_class_prob), axis=1)
-                Ua = logsumexp(np.minimum(f_hat_y_x, f1_hat_y_x) + np.log(mean_class_prob), axis=1)
-                Ue = np.clip(Ue, a_min=-1e40, a_max=None)
-                total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0)
+                                                n=self.n_neighbors, dim=self.training_embeddings_.shape[1],
+                                                squared_kernel_int=self.squared_kernel_int)
+
+                Ue = log_half_gaussian_mean(asymptotic_var=log_as_var).squeeze()
+                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True)
+                if not self.use_uniform_prior:
+                    Ua = logsumexp(
+                        np.concatenate([Ua[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)], axis=0),
+                        axis=0)
+                Ua = Ua.squeeze()
+
+                # Ue = np.clip(Ue, a_min=-1e40, a_max=None)
+
+                total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0).squeeze()
 
             if Ue_total.shape[0] == 0:
                 Ue_total = Ue
@@ -165,13 +173,9 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         check_is_fitted(self)
         X = check_array(X)
         f_hat, f1_hat = self._get_nw_estimates(X=X, batch_size=batch_size)
-        if not self.precise_computation:
-            probs = f_hat / np.sum(f_hat + 0.0001, axis=-1, keepdims=True)
-            probsm1 = 1 - probs
-        else:
-            denominator = logsumexp(f_hat, axis=-1)[..., None]
-            probs = f_hat - denominator
-            probsm1 = f1_hat - denominator
+        probs = f_hat
+        probsm1 = f1_hat
+
         output = {"probs": probs, "probsm1": probsm1}
 
         return output
