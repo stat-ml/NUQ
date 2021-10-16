@@ -174,7 +174,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         X = check_array(X)
         f_hat, f1_hat = self._get_nw_estimates(X=X, batch_size=batch_size)
         probs = f_hat
-        probsm1 = f1_hat
+        probsm1 = f1_ hat
 
         output = {"probs": probs, "probsm1": probsm1}
 
