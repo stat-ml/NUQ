@@ -293,9 +293,11 @@ class NuqRegressor(BaseEstimator):
                                                        n_neighbors=self.n_neighbors,
                                                        method=self.method)
 
-            output = get_nw_mean_estimate_regerssion(targets=selected_labels, weights=weights, coeff=self.coeff,
-                                          precise_computation=self.precise_computation, n_clasees=self.n_classes,
-                                          use_uniform_prior=self.use_uniform_prior)
+            output = get_nw_mean_estimate_regerssion(
+                targets=selected_labels, 
+                weights=weights,
+                precise_computation=self.precise_computation
+            )
 
             current_f_hat = output["f_hat"]
             current_f_sq_hat = output["f_sq_hat"]
@@ -331,7 +333,7 @@ class NuqRegressor(BaseEstimator):
         return f_hat_x
         
 
-    def predict_uncertainty(self, X, batch_size=50000):
+    def predict_uncertainty(self, X, batch_size=50000, infinity=np.inf):
         batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
         Ue_total = np.array([])
         Ua_total = np.array([])
@@ -339,17 +341,23 @@ class NuqRegressor(BaseEstimator):
         for batch in batches:
             X_batch = X[batch[0]: batch[1]]
             f_hat_x = self.get_kde(X_batch, batch_size=batch_size)
-            output = self._get_nw_estimates(X_batch, batch_size=batch_size)
-            f_hat = output["f_hat"]
-            f_sq_hat = output["f_sq_hat"]
+            if self.precise_computation:
+                ininity_points = f_hat_x < -20
+                f_hat_x = np.exp(f_hat_x)
+            f_hat, f_sq_hat = self._get_nw_estimates(X_batch, batch_size=batch_size)
 
             sigma_est = f_sq_hat - f_hat ** 2
             as_var = asymptotic_var(sigma_est=sigma_est, f_est=f_hat_x, bandwidth=self.bandwidth,
                                     n=self.n_neighbors)
 
             Ue = as_var
+            Ue[ininity_points] = infinity
+            Ue[Ue > infinity] = infinity
+        
             Ua = sigma_est
             total_uncertainty = Ue + Ua
+            total_uncertainty[ininity_points] = infinity
+            total_uncertainty[total_uncertainty > infinity] = infinity
 
             if Ue_total.shape[0] == 0:
                 Ue_total = Ue

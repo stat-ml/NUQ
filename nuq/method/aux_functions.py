@@ -170,13 +170,14 @@ def get_nw_mean_estimate_regerssion(targets, weights, precise_computation):
         kernel is logarithmed yet
         """
         log_weights = weights
+        max_weights = np.max(log_weights).reshape(-1, 1)
 
-        log_denominator = logsumexp(log_weights)
-        log_numerator_lin = logsumexp(log_weights, b=targets)
-        log_numerator_sq = logsumexp(log_weights, b = targets ** 2)
+        denominator = np.sum(np.exp(log_weights - max_weights), axis=1)
+        numerator_lin = np.sum(np.exp(log_weights - max_weights) * targets, axis=1)
+        numerator_sq = np.sum(np.exp(log_weights - max_weights) * (targets ** 2), axis=1)
 
-        f_hat = np.exp(log_numerator_lin - log_denominator)
-        f_sq_hat = np.exp(log_numerator_sq - log_denominator)
+        f_hat = numerator_lin / denominator
+        f_sq_hat = numerator_sq / denominator
 
     return {
         "f_hat": f_hat,
