@@ -1,0 +1,21 @@
+CHANGES
+=======
+
+* hnsw without parallel
+* n\_jobs parameter
+* parallelize
+* local variant
+* refactor: initial commit
+* Fix the typo
+* Make the packcage
+* Cleaner example and little bit more compatible
+* Rename to nuq
+* Initial commit
+* Minor stuff with batch formation is fixed
+* Refined minibatches for uncertainty
+* Added minibatch for uncertainties
+* Added 3 types of uncertainty
+* Minor changes
+* Added small value for numerical stability in uncertainty
+* Added logsumexp computation of the conditional
+* Nadaraya-Watson method for uncertainty quantification

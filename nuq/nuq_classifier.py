@@ -1,40 +1,38 @@
-from collections import defaultdict
+from functools import partial
 
-from tqdm.auto import tqdm
-from joblib import Parallel, delayed
-import hnswlib
 import numpy as np
-from scipy.sparse import csr_matrix
-from scipy.special import softmax, logsumexp, log_softmax
-from scipy.stats.stats import weightedtau
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.utils.validation import check_X_y, check_is_fitted, check_array
-from sklearn.model_selection import GridSearchCV
-
+import pandas as pd
+import ray
 from KDEpy.bw_selection import (
     improved_sheather_jones,
-    silvermans_rule,
     scotts_rule,
+    silvermans_rule,
 )
+from scipy.sparse import csr_matrix
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.model_selection import StratifiedKFold
+from sklearn.utils.validation import check_X_y
+from tqdm.auto import tqdm
+
+from .misc import parse_param
+from .ray_utils import HNSWActor, predict_log_proba_batch
 
 
 class NuqClassifier(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
-        mixture_weight=0.2,
+        log_pN=0.0,
         kernel_type="RBF",
-        method="hnsw",
         n_neighbors=20,
-        tune_bandwidth=True,
-        strategy="isj",
-        bandwidth=np.ones(shape=(1, 1)),
+        tune_bandwidth="classification",
+        bandwidth=1.0,
         use_centroids=False,
-        sparse=False,
+        sparse=True,
         verbose=False,
-        n_jobs=-1,
+        batch_size=1000,
+        random_seed=42,
     ):
         """
-
         :param kernel_type:
         :param method:
         :param n_neighbors:
@@ -45,17 +43,16 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         :param precise_computation: if True, everything is computed in terms of log
         :param use_centroids: whether use centroids or not
         """
-        self.mixture_weight = mixture_weight
+        self.log_pN = log_pN
         self.tune_bandwidth = tune_bandwidth
-        self.strategy = strategy
         self.kernel_type = kernel_type
         self.bandwidth = bandwidth
-        self.method = method
         self.n_neighbors = n_neighbors
         self.use_centroids = use_centroids
         self.sparse = sparse
         self.verbose = verbose
-        self.n_jobs = n_jobs
+        self.batch_size = batch_size
+        self.random_seed = random_seed
 
     @staticmethod
     def compute_centroids(embeddings, labels):
@@ -77,7 +74,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         return np.array(centers), np.array(labels_unique)
 
     @staticmethod
-    def _get_log_kernel(name="RBF", bandwidth=np.ones(1)):
+    def _get_log_kernel(name="RBF", bandwidth=1.0):
         """Constructs kernel function with signature:
           f(X: [N, d], Y: [N, d]) -> values [N]
 
@@ -102,7 +99,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             raise ValueError(f"Unsupported kernel: {name}")
 
     def _optimal_bandwidth(
-        self, n_neighbors=(5, 20), n_points=5, cv=3, n_jobs=-1, verbose=3
+        self, X, y, n_points=5, n_folds=10, n_samples=3, verbose=0
     ):
         """Select optimal bandwidth value via fitting the kNN
         model with various bandwidths.
@@ -113,33 +110,55 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         Returns:
             [type]: [description]
         """
-        knn_min, knn_max = n_neighbors
-        knn_max = min(knn_max, self.n_neighbors)
-        _, distances = self.index.knn_query(self.X_, k=knn_max)
-
-        classificator = NuqClassifier(
-            tune_bandwidth=False,
-            n_neighbors=knn_max,
-            verbose=False,
-            sparse=True,
-            n_jobs=1,
+        skf = StratifiedKFold(
+            n_splits=n_folds, shuffle=True, random_state=self.random_seed
         )
-        grid = np.linspace(
-            distances[:, 1].mean(), distances[:, -1].mean(), n_points
-        )
-        gs = GridSearchCV(
-            classificator,
-            param_grid={"bandwidth": grid},
-            scoring="accuracy",
-            cv=cv,
-            n_jobs=-1,
-            verbose=verbose,
-        )
-        gs.fit(self.X_, self.y_)
+        it = skf.split(X, y)
 
-        return gs.best_params_["bandwidth"], gs.best_score_
+        grid = None
+        results = {}
+        for i, (train_idx, val_idx) in tqdm(
+            zip(range(n_samples), it),
+            total=n_samples,
+            disable=(not verbose),
+            desc="Tuning bandwidth",
+        ):
+            # Prepare a new Nuq instance with disabled `tune_bandwidth`
+            params = self.get_params()
+            params.update(tune_bandwidth=None, verbose=False)
+            nuq = NuqClassifier(**params)
 
-    def _tune_kernel(self, strategy="isj", **kwargs):
+            # Build kNN index
+            X_train, y_train = X[train_idx], y[train_idx]
+            X_val, y_val = X[val_idx], y[val_idx]
+            nuq.fit(X_train, y_train)
+
+            # If grid is not set yet, initialize it
+            if grid is None:
+                _, dists = ray.get(
+                    nuq.index_.knn_query.remote(nuq.X_ref_, return_dist=True)
+                )
+                dists_mean = dists.mean(axis=0)
+                left, right = dists_mean[1], dists_mean[-1]
+                grid = np.linspace(left, right, n_points)
+
+            # Compute score for every bandwidth
+            scores = []
+            for bandwidth in grid:
+                nuq.log_kernel_ = NuqClassifier._get_log_kernel(
+                    nuq.kernel_type, bandwidth
+                )
+                scores.append(nuq.score(X_val, y_val))
+            results[f"fold_{i}"] = scores
+            del nuq
+
+        results = pd.DataFrame(results)
+        scores_mean = results.mean(axis=1)
+        best_idx = scores_mean.argmax()
+
+        return grid[best_idx], scores_mean[best_idx]
+
+    def _tune_kernel(self, X, y, strategy="isj"):
         standard_strategies = {
             "isj": improved_sheather_jones,
             "silverman": silvermans_rule,
@@ -148,11 +167,13 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         if strategy in standard_strategies:
             method = standard_strategies[strategy]
             bandwidth = np.apply_along_axis(
-                lambda x: method(x[..., None]), axis=0, arr=self.X_
+                lambda x: method(x[..., None]), axis=0, arr=X
             )
             print(f"  [{strategy.upper()}] {bandwidth = }")
-        elif strategy == "classification":
-            bandwidth, score = self._optimal_bandwidth(**kwargs)
+        elif "classification" in strategy:
+            _, kwargs = parse_param(strategy)
+            kwargs = dict(map(lambda x: (x[0], int(x[1])), kwargs.items()))
+            bandwidth, score = self._optimal_bandwidth(X, y, **kwargs)
             print(f"  [{strategy.upper()}] {bandwidth = } ({score = })")
         else:
             raise ValueError("No such strategy")
@@ -182,126 +203,42 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         # 1. Compute centroid for each class
         if self.use_centroids:
             X, y = NuqClassifier.compute_centroids(embeddings=X, labels=y)
-
-        # Save preprocessed input
-        self.X_, self.y_ = X, y
+        self.n_classes_ = y.max() + 1
 
         # Get prior class weights
         _, counts = np.unique(y, return_counts=True)
-        self.class_weights_ = counts / len(y)
-        self.log_prior_ = np.log(self.class_weights_)
-        self.class_default_ = self.class_weights_.argmax()
-        self.log_prior_default_ = np.log(
-            self.class_weights_[self.class_default_]
-        ) + np.log(self.mixture_weight)
 
-        # 2. Construct kNN index
-        if self.method == "hnsw":
-            self.index = hnswlib.Index(space="l2", dim=self.X_.shape[1])
-            self.index.init_index(
-                max_elements=self.X_.shape[0],
-                M=16,
-                ef_construction=200,
-                random_seed=42,
-            )
-            self.index.add_items(self.X_)
-        else:
-            raise ValueError
+        log_prior = np.log(counts) - np.log(len(y))
+        self.class_default_ = log_prior.argmax()
+        self.log_prior_default_ = log_prior[self.class_default_] + self.log_pN
 
-        # 3. Tune kernel bandwidth
-        if self.tune_bandwidth:
+        # Move log prior vector to shared memory
+        self.log_prior_ref_ = ray.put(log_prior)
+
+        # 2. Tune kernel bandwidth
+        if self.tune_bandwidth is not None:
             self.bandwidth = self._tune_kernel(
-                strategy=self.strategy, n_neighbors=(5, self.n_neighbors)
+                X, y, strategy=self.tune_bandwidth
             )
 
         self.log_kernel_ = NuqClassifier._get_log_kernel(
             self.kernel_type, self.bandwidth
         )
 
+        # 3. Construct kNN index on remote
+
+        # Move preprocessed input to shared memory
+        self.X_ref_, self.y_ref_ = ray.put(X), ray.put(y)
+
+        self.index_ = HNSWActor.remote(
+            self.X_ref_,
+            n_neighbors=self.n_neighbors,
+            random_seed=self.random_seed,
+        )
+
         return self
 
-    def predict_proba_single_(self, idx, X, return_uncertainty=False):
-        classes_cur, encoded = np.unique(self.y_[idx], return_inverse=True)
-
-        log_kernel = self.log_kernel_(self.X_[idx, :], X)
-        log_ps_cur = np.zeros(classes_cur.shape[0])
-
-        # Get positions for each class
-        indices = defaultdict(list)
-        for i, v in enumerate(encoded):
-            indices[v].append(i)
-
-        log_ps_cur = np.array(
-            [
-                logsumexp(log_kernel[indices[k]])
-                for k in range(len(classes_cur))
-            ]
-        )
-
-        log_ps_total_cur = logsumexp(
-            np.c_[
-                np.log1p(-self.mixture_weight) + log_ps_cur,
-                np.log(self.mixture_weight) + self.log_prior_[classes_cur],
-            ],
-            axis=1,
-        )
-
-        log_denominator = logsumexp(
-            np.r_[
-                np.log1p(-self.mixture_weight) + log_ps_cur,
-                np.log(self.mixture_weight),
-            ]
-        )
-
-        idx_max = np.argmax(log_ps_total_cur)
-        if log_ps_total_cur[idx_max] > self.log_prior_default_:
-            class_pred = [classes_cur[idx_max]]
-            log_numerator_p = log_ps_total_cur[idx_max]
-
-        else:
-            class_pred = [self.class_default_]
-            log_numerator_p = self.log_prior_default_
-
-        log_ps_pred = log_numerator_p - log_denominator
-
-        # Compute actual probabilities from logarithms
-        ps_pred = [np.exp(log_ps_pred)]
-
-        if not return_uncertainty:
-            return class_pred, ps_pred
-
-        if log_ps_total_cur[idx_max] > self.log_prior_default_:
-            log_numerator_1mp = logsumexp(
-                np.r_[
-                    log_ps_cur[:idx_max],
-                    log_ps_cur[idx_max + 1 :],
-                    np.log(self.mixture_weight)
-                    + np.log1p(-self.log_prior_[idx_max]),
-                ]
-            )
-        else:
-            log_numerator_1mp = logsumexp(
-                np.r_[
-                    log_ps_cur,
-                    np.log(self.mixture_weight)
-                    + np.log1p(-self.log_prior_default_),
-                ]
-            )
-
-        # print(f"{log_numerator_p = }")
-        # print(f"{log_numerator_1mp = }")
-        # print(f"{log_denominator = }")
-
-        log_sigma2_total = (
-            log_numerator_p
-            + log_numerator_1mp
-            - 3 * log_denominator
-            + X.shape[0] / 2 * np.log(np.pi)
-        )
-
-        return class_pred, ps_pred, log_sigma2_total
-
-    def predict_proba(self, X, return_uncertainty=False):
+    def predict_proba(self, X, return_uncertainty=False, batch_size=None):
         """Finds k = `n_neighbors` nearest neighbours for `current_embeddings` among
         `train_embeddings` and computes the `kernel` function for each pair
 
@@ -325,54 +262,46 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             w_raw ([type]): weights matrix
             selected_labels ([type]): corresponding labels
         """
-        check_is_fitted(self)
-        X = check_array(X)
+        if batch_size is None:
+            batch_size = self.batch_size
 
-        if self.method == "hnsw":
-            I, _ = self.index.knn_query(X, k=self.n_neighbors)
-        else:
-            raise ValueError(f"Unsupported method: {self.method}")
+        # Move query to the shared memory
+        X_ref = ray.put(X)
+        idx_ref = self.index_.knn_query.remote(X_ref, return_dist=False)
 
-        classes = []
-        ps = []
-        log_sigma2_totals = []
-
-        res = Parallel(n_jobs=self.n_jobs)(
-            delayed(self.predict_proba_single_)(
-                I[i, :], X[i, :], return_uncertainty=return_uncertainty
-            )
-            for i in tqdm(range(X.shape[0]), disable=not self.verbose)
+        predict_log_proba_handle = partial(
+            predict_log_proba_batch.remote,
+            self.X_ref_,
+            self.y_ref_,
+            X_ref,
+            idx_ref,
+            batch_size=batch_size,
+            log_kernel=self.log_kernel_,
+            log_prior=self.log_prior_ref_,
+            log_pN=self.log_pN,
+            log_prior_default=self.log_prior_default_,
+            class_default=self.class_default_,
+            return_uncertainty=return_uncertainty,
         )
 
-        if return_uncertainty:
-            classes, ps, log_sigma2_totals = zip(*res)
-        else:
-            classes, ps = zip(*res)
+        res_refs = []
+        for i in range(0, X.shape[0], batch_size):
+            res_refs.append(predict_log_proba_handle(i))
 
-        # # Get prediction for each row of nearest neighbours
-        # for i in tqdm(range(X.shape[0]), disable=not verbose):
-        #     res = self.predict_proba_single_(
-        #         X[i, :], return_uncertainty=return_uncertainty
-        #     )
-        #     classes.append(res[0])
-        #     ps.append(res[1])
-        #     if return_uncertainty:
-        #         log_sigma2_totals.append(res[2])
+        pred, log_proba, log_unc = map(np.concatenate, zip(*ray.get(res_refs)))
 
-        sizes = np.array([len(arr) for arr in classes])
-        indptr = np.r_[0, np.cumsum(sizes)]
-        indices = np.concatenate(classes)
-        data = np.concatenate(ps, dtype=np.float32)
+        indptr = np.r_[np.arange(pred.shape[0] + 1, dtype=np.int64)]
+        indices = pred
+        data = np.exp(log_proba)
 
-        n_classes = self.y_.max() + 1
         probs = csr_matrix(
-            (data, indices, indptr), shape=(X.shape[0], n_classes)
+            (data, indices, indptr), shape=(X.shape[0], self.n_classes_)
         )
         if not self.sparse:
             probs = probs.toarray()
 
         if return_uncertainty:
-            return probs, np.array(log_sigma2_totals)
+            return probs, log_unc
         else:
             return probs
 

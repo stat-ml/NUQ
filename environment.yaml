@@ -1,0 +1,38 @@
+name: ray-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip
+
+  # Computations
+  - numpy
+  - matplotlib
+  - scikit-learn
+  - scipy
+  - pandas
+  - seaborn
+
+  # Jupyter Lab
+  - ipykernel
+  - ipywidgets
+  - nb_black # black formatter
+  - wurlitzer # C level output
+
+  # Parallelism
+  - ray-dashboard
+
+  # Utilities
+  - tqdm # progress bar
+  - black # formatter
+  - isort # import sorter
+  - flake8 # linter
+  - pre_commit # git pre-commit hooks
+  - pytest # code testing
+  - pybind11 # hnswlib build
+  - cython # KDEpy build
+
+  - pip:
+    - hnswlib
+    - KDEpy
