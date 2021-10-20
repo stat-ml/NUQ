@@ -15,7 +15,7 @@ from sklearn.utils.validation import check_X_y
 from tqdm.auto import tqdm
 
 from .misc import parse_param
-from .ray_utils import HNSWActor, predict_log_proba_batch
+from .ray_utils import HNSWActor, predict_log_proba_batch, to_iterator
 
 
 class NuqClassifier(BaseEstimator, ClassifierMixin):
@@ -288,7 +288,15 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         for i in range(0, X.shape[0], batch_size):
             res_refs.append(predict_log_proba_handle(i))
 
-        pred, log_proba, log_unc = map(np.concatenate, zip(*ray.get(res_refs)))
+        res = []
+        for x in tqdm(
+            to_iterator(res_refs),
+            total=len(res_refs),
+            disable=(not self.verbose),
+        ):
+            res.append(x)
+
+        pred, log_proba, log_unc = map(np.concatenate, zip(*res))
 
         indptr = np.r_[np.arange(pred.shape[0] + 1, dtype=np.int64)]
         indices = pred

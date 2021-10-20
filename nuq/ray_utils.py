@@ -8,6 +8,12 @@ import ray
 from scipy.special import logsumexp
 
 
+def to_iterator(obj_ids):
+    while obj_ids:
+        done, obj_ids = ray.wait(obj_ids)
+        yield ray.get(done[0])
+
+
 @ray.remote
 class HNSWActor:
     """Ray Actor interface for HNSW index to leverage the shared storage of `X_base` (vector index)."""
