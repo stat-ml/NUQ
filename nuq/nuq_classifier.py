@@ -11,6 +11,7 @@ from KDEpy.bw_selection import (
 from scipy.sparse import csr_matrix
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.validation import check_X_y
 from tqdm.auto import tqdm
 
@@ -199,6 +200,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             self: fitted model
         """
         X, y = check_X_y(X, y)
+        self.label_encoder_ = LabelEncoder()
+        y = self.label_encoder_.fit_transform(y)
 
         # 1. Compute centroid for each class
         if self.use_centroids:
@@ -314,9 +317,14 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             return probs
 
     def predict(self, X, return_uncertainty=False):
+        probs = self.predict_proba(X, return_uncertainty=return_uncertainty)
         if return_uncertainty:
-            probs, uncertainty = self.predict_proba(X, return_uncertainty=True)
-            return probs.argmax(axis=1), uncertainty
+            probs, uncertainty = probs
+        probs = self.label_encoder_.inverse_transform(
+            np.array(probs.argmax(axis=1)).ravel()
+        )
+
+        if return_uncertainty:
+            return probs, uncertainty
         else:
-            probs = self.predict_proba(X, return_uncertainty=False)
-            return probs.argmax(axis=1)
+            return probs
