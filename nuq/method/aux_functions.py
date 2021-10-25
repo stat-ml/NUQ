@@ -77,6 +77,7 @@ def compute_centroids(embeddings, labels):
 
 
 def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_labels, n_neighbors, method='hnsw'):
+    # expects valid number of nearest neighbors (0 < ... <= train_embeddings.shape[0])
     if len(current_embeddings.shape) < 2:
         current_embeddings = current_embeddings.reshape(1, -1)
     if method == 'hnsw' or method == 'all_data':
@@ -93,7 +94,7 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
     assert w_raw.shape == (current_embeddings.shape[0], n_neighbors, 1)
     return w_raw, selected_labels
 
-
+# maybe divide this function in two? and rename it
 def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=None, use_uniform_prior=False):
     log_numerator_pre = logsumexp(log_weights, axis=1, b=targets)
     if use_uniform_prior:
@@ -118,7 +119,7 @@ def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=No
     return f_hat, log_denomerator
 
 
-def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, use_uniform_prior, coeff=1.):
+def get_nw_mean_estimate(targets, weights, n_clasees, use_uniform_prior, coeff=1.):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
