@@ -176,8 +176,13 @@ def get_nw_mean_estimate_regerssion(targets, weights, precise_computation):
         numerator_lin = np.sum(np.exp(log_weights - max_weights) * targets, axis=1)
         numerator_sq = np.sum(np.exp(log_weights - max_weights) * (targets ** 2), axis=1)
 
-        f_hat = numerator_lin / denominator
-        f_sq_hat = numerator_sq / denominator
+        f_hat = np.zeros(numerator_lin.shape)
+        f_sq_hat = np.zeros(numerator_sq.shape)
+
+        non_zero_indices = (denominator > 0)
+
+        f_hat[non_zero_indices] = numerator_lin[non_zero_indices] / denominator[non_zero_indices]
+        f_sq_hat[non_zero_indices] = numerator_sq[non_zero_indices] / denominator[non_zero_indices]
 
     return {
         "f_hat": f_hat,
