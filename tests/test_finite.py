@@ -4,7 +4,7 @@ from sklearn.model_selection import train_test_split
 from nuq import NuqClassifier
 
 
-def test_uniform():
+def test_finite():
     # Number of points
     N = 500
     # Number of classes

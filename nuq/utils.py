@@ -1,11 +1,16 @@
 from collections import defaultdict
 from functools import partial
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import hnswlib
 import numpy as np
+import pandas as pd
 import ray
 from scipy.special import logsumexp
+from sklearn.model_selection import StratifiedKFold
+from tqdm.auto import tqdm
+
+from . import kernels
 
 
 def to_iterator(obj_ids):
@@ -204,7 +209,7 @@ def predict_log_proba_batch(
     log_pN : float
         Prior importance hyperparameter
     log_prior_default : float
-        Highest priot probability
+        Highest prior probability
     class_default : int
         Class with highest priot probability
     return_uncertainty : bool, optional
@@ -212,6 +217,8 @@ def predict_log_proba_batch(
 
     Returns
     -------
+        i : int
+            Batch start position, for order recovery
         pred : np.ndarray[int]
             Predicted class for each entry
         log_proba : np.ndarray[float]
@@ -240,4 +247,166 @@ def predict_log_proba_batch(
             X_base[idx], y_base[idx], X
         )
 
-    return preds, log_probas, log_uncs
+    return i, preds, log_probas, log_uncs
+
+
+def compute_centroids(
+    embeddings: np.ndarray, labels: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Computes centroids for each label group
+
+    Parameters
+    ----------
+    embeddings : np.ndarray
+        embeddings
+    labels : np.ndarray
+        corresponding labels
+
+    Returns
+    -------
+    centers : np.ndarray
+        center of each centroid
+    centers : np.ndarray
+        corresponding labels
+    """
+    centers, labels_unique = [], []
+    for c in np.unique(labels):
+        mask = labels == c
+        centers.append(np.mean(embeddings[mask], axis=0))
+        labels_unique.append(c)
+    return np.array(centers), np.array(labels_unique)
+
+
+def optimal_bandwidth(
+    model,
+    X: np.ndarray,
+    y: np.ndarray,
+    n_points: int = 5,
+    n_folds: int = 10,
+    n_samples: int = 3,
+    verbose: int = 0,
+) -> Tuple[float, float]:
+    """Selects an optimal bandwidth via cross validation.
+
+    Parameters
+    ----------
+    model
+        model to optimize
+    X : np.ndarray
+        data points
+    y : np.ndarray
+        corresponding labels
+    n_points : int, optional
+        number of bandwidth values to check, by default 5
+    n_folds : int, optional
+        number of folds to create, by default 10
+    n_samples : int, optional
+        number of folds to compute score on, by default 3
+    verbose : int, optional
+        level of verbosity (show progressbar), by default 0
+
+    Returns
+    -------
+    best_bandwidth : float
+    best_score : float
+    """
+    ModelClass = type(model)
+    skf = StratifiedKFold(
+        n_splits=n_folds, shuffle=True, random_state=model.random_seed
+    )
+    it = skf.split(X, y)
+
+    grid = None
+    results = {}
+    for i, (train_idx, val_idx) in tqdm(
+        zip(range(n_samples), it),
+        total=n_samples,
+        disable=(not verbose),
+        desc="Tuning bandwidth",
+    ):
+        # Prepare a new Nuq instance with disabled `tune_bandwidth`
+        params = model.get_params()
+        params.update(tune_bandwidth=None, verbose=False)
+        nuq = ModelClass(**params)
+
+        # Build kNN index
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val, y_val = X[val_idx], y[val_idx]
+        nuq.fit(X_train, y_train)
+
+        # If grid is not set yet, initialize it
+        if grid is None:
+            _, dists = ray.get(
+                nuq.index_.knn_query.remote(nuq.X_ref_, return_dist=True)
+            )
+            dists_mean = dists.mean(axis=0)
+            left, right = dists_mean[1], dists_mean[-1]
+            grid = np.linspace(left, right, n_points)
+
+        # Compute score for every bandwidth
+        scores = []
+        for bandwidth in grid:
+            nuq.log_kernel_ = get_log_kernel(nuq.kernel_type, bandwidth)
+            scores.append(nuq.score(X_val, y_val))
+        results[f"fold_{i}"] = scores
+        del nuq
+
+    results = pd.DataFrame(results)
+    scores_mean = results.mean(axis=1)
+    best_idx = scores_mean.argmax()
+
+    return grid[best_idx], scores_mean[best_idx]
+
+
+def get_log_kernel(
+    name: str = "RBF", bandwidth: Union[float, np.ndarray] = 1.0
+) -> Callable:
+    """Constructs log kernel function with signature:
+    f(X: [N, d], Y: [N, d]) -> values [N]
+
+    Parameters
+    ----------
+    name : str, optional
+        kernel name, check `nuq.kernels`, by default "RBF"
+    bandwidth : Union[float, np.ndarray], optional
+        bandwidth, by default 1.0
+
+    Returns
+    -------
+    Callable
+        log kernel function
+
+    Raises
+    ------
+    ValueError
+        unknown kernel
+    """
+
+    try:
+        return getattr(kernels, name.lower())(bandwidth)
+    except AttributeError:
+        raise ValueError(f"Unsupported kernel: {name}")
+
+
+def parse_param(param_string: str) -> Tuple[str, Dict[str, str]]:
+    """Parses a string of form "name" or "name:value=1"
+    or "name:value1=1;value2=2" and similar. Used to pass parameters
+    without messing with dictionaries.
+
+    Parameters
+    ----------
+    param_string : str
+        string of the above form
+
+    Returns
+    -------
+    Tuple[str, Dict[str, str]]
+        either `name`, {} or `name` with dictionary of parameters
+    """
+    res = param_string.split(":", maxsplit=1)
+    if len(res) == 1:
+        return res[0], {}
+    name, vals_string = res
+    vals_strings = filter(None, vals_string.split(";"))
+    vals = [v.split("=", maxsplit=1) for v in vals_strings]
+    return name, dict(vals)
