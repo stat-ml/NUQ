@@ -51,7 +51,6 @@ def test_small_data():
     weights, labels = nuq.compute_weights(knn, nuq_tr.kernel, x_test, x_train, y_train, 1)
     assert np.allclose(kernel_output, weights), "weights using kernel and compute_weights functions"
 
-
     proba = nuq.get_nw_mean_estimate(np.array([[0]]), weights, 2, False)
     proba_0class, proba_1_0class = proba["f_hat"], proba["f1_hat"]
     proba = nuq.get_nw_mean_estimate(np.array([[1]]), weights, 2, False)
@@ -65,9 +64,17 @@ def test_small_data():
 
     uncertainty_dict = nuq_tr.predict_uncertainty(x_test)
     assert np.allclose(uncertainty_dict["aleatoric"], \
-        np.log(np.minimum(1 - np.exp(proba_0class), 1 - np.exp(proba_1_0class))))
+        np.log(np.minimum(1 - np.exp(proba_0class), 1 - np.exp(proba_1_0class)))), "aleatoric uncertainty"
 
-    # to do 
-    # assert np.allclose(uncertainty_dict["epistemic"], )
+    # to do
+    # understand what is happening with logarithms of probabilities
+    print(proba_0class + proba_0_1class, proba_1class + proba_1_0class, np.maximum(proba_0class + proba_0_1class, proba_1class + proba_1_0class))
+    epistemic_uncertainty = np.log(2 * np.sqrt(2 / np.pi)) - 0.5 * nuq_tr.get_kde(x_test)
+    print(epistemic_uncertainty)
+    epistemic_uncertainty += 0.5 * np.maximum(proba_0class + proba_0_1class, proba_1class + proba_1_0class)
+    print(epistemic_uncertainty)
+    epistemic_uncertainty += 1 / (2 * np.sqrt(np.pi))
+    print(uncertainty_dict["epistemic"], epistemic_uncertainty)
+    assert np.allclose(uncertainty_dict["epistemic"], epistemic_uncertainty)
 
     assert False
