@@ -68,13 +68,10 @@ def test_small_data():
 
     # to do
     # understand what is happening with logarithms of probabilities
-    print(proba_0class + proba_0_1class, proba_1class + proba_1_0class, np.maximum(proba_0class + proba_0_1class, proba_1class + proba_1_0class))
     epistemic_uncertainty = np.log(2 * np.sqrt(2 / np.pi)) - 0.5 * nuq_tr.get_kde(x_test)
-    print(epistemic_uncertainty)
-    epistemic_uncertainty += 0.5 * np.maximum(proba_0class + proba_0_1class, proba_1class + proba_1_0class)
-    print(epistemic_uncertainty)
+    epistemic_uncertainty += 0.5 * np.maximum(proba_0class + proba_1_0class, proba_1class + proba_0_1class)
     epistemic_uncertainty += 1 / (2 * np.sqrt(np.pi))
-    print(uncertainty_dict["epistemic"], epistemic_uncertainty)
-    assert np.allclose(uncertainty_dict["epistemic"], epistemic_uncertainty)
+
+    assert np.allclose(uncertainty_dict["epistemic"], epistemic_uncertainty), "epistemic uncertainty"
 
     assert False
