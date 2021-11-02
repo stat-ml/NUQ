@@ -1,10 +1,11 @@
 import nuq
 import numpy as np
 
-def test_small_data():
+def test_one_point():
     x_train = np.array([[1, 0]])
     y_train = np.array([0])
     x_test = np.array([[0, 0]])
+
     d = 2
     n = 1
     h = 4
@@ -66,12 +67,10 @@ def test_small_data():
     assert np.allclose(uncertainty_dict["aleatoric"], \
         np.log(np.minimum(1 - np.exp(proba_0class), 1 - np.exp(proba_1_0class)))), "aleatoric uncertainty"
 
-    # to do
-    # understand what is happening with logarithms of probabilities
     epistemic_uncertainty = np.log(2 * np.sqrt(2 / np.pi)) - 0.5 * nuq_tr.get_kde(x_test)
     epistemic_uncertainty += 0.5 * np.maximum(proba_0class + proba_1_0class, proba_1class + proba_0_1class)
     epistemic_uncertainty += 1 / (2 * np.sqrt(np.pi))
 
     assert np.allclose(uncertainty_dict["epistemic"], epistemic_uncertainty), "epistemic uncertainty"
 
-    assert False
+    # assert False
