@@ -1,4 +1,5 @@
 from functools import partial
+from typing import Optional
 
 import numpy as np
 import ray
@@ -160,7 +161,10 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         return self
 
     def predict_proba(
-        self, X: np.ndarray, return_uncertainty=False, batch_size=None
+        self,
+        X: np.ndarray,
+        return_uncertainty: Optional[str] = None,
+        batch_size: Optional[int] = None,
     ):
         """Predicts probability distribution between classes for each input X.
 
@@ -168,8 +172,12 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         ----------
         X : np.ndarray
             array of shape [N, d]; each row is a vector to predict probabilities for
-        return_uncertainty : bool, optional
+        return_uncertainty : str, optional
             whether to return probabilities with or without uncertainty
+              - None: no uncertainty is returned
+              - "aleatoric": log (min(p_pred, 1 - p_pred))
+              - "epistemic": log (tau^2) without the normalizing factor, check NUQ paper
+
         batch_size : int, optional
             number of samples per batch, by default None
 
@@ -180,6 +188,13 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         uncertainty : np.ndarray [optional]
             corresponding uncertainties if `return_uncertainty == True`
         """
+        allowed = ["aleatoric", "epistemic"]
+        if not (return_uncertainty is None or return_uncertainty in allowed):
+            raise ValueError(
+                "Unsupported `return_uncertainty` value. Expected one of"
+                f"[None, 'aleatoric', 'epistemic'], but received {return_uncertainty}"
+            )
+
         if batch_size is None:
             batch_size = self.batch_size
 
@@ -199,7 +214,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             log_pN=self.log_pN,
             log_prior_default=self.log_prior_default_,
             class_default=self.class_default_,
-            return_uncertainty=return_uncertainty,
+            return_uncertainty=(return_uncertainty == "epistemic"),
         )
 
         res_refs = []
@@ -230,12 +245,16 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         if not self.sparse:
             probs = probs.toarray()
 
-        if return_uncertainty:
-            return probs, log_unc
-        else:
+        if return_uncertainty is None:
             return probs
+        elif return_uncertainty == "epistemic":
+            return probs, log_unc
+        elif return_uncertainty == "aleatoric":
+            return probs, np.minimum(
+                np.exp(log_proba), np.log1p(-np.exp(log_proba))
+            )
 
-    def predict(self, X: np.ndarray, return_uncertainty=False):
+    def predict(self, X: np.ndarray, return_uncertainty: Optional[str] = None):
         """Predicts class for each entry and corresponding
         uncertainties (optional).
 
@@ -250,8 +269,11 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         -------
         probs : Any[np.ndarray, scipy.sparse.csr_matrix]
             sparse/dense matrix of probabilities per sample
-        uncertainty : np.ndarray [optional]
-            corresponding uncertainties if `return_uncertainty == True`
+        return_uncertainty : str, optional
+            whether to return probabilities with or without uncertainty
+              - None: no uncertainty is returned
+              - "aleatoric": log (min(p_pred, 1 - p_pred))
+              - "epistemic": log (tau^2) without the normalizing factor, check NUQ paper
         """
 
         probs = self.predict_proba(X, return_uncertainty=return_uncertainty)
@@ -261,7 +283,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             np.array(probs.argmax(axis=1)).ravel()
         )
 
-        if return_uncertainty:
-            return probs, uncertainty
-        else:
+        if return_uncertainty is None:
             return probs
+        else:
+            return probs, uncertainty
