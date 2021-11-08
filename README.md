@@ -23,7 +23,7 @@ from nuq import NuqClassifier
 
 nuq = NuqClassifier()
 nuq.fit(X_train, y_train)
-preds, uncs = nuq.predict(X_test, return_uncertainty=True)
+preds, uncs = nuq.predict(X_test, return_uncertainty="epistemic")
 ```
 
 ## Installation
