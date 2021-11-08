@@ -18,8 +18,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                  bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=True):
         """
 
-        :param kernel_type:
-        :param method:
+        :param kernel_type: options are ['RBF', 'logistic', 'sigmoid']
+        :param method: options are ['all_data', 'hnsw']
         :param n_neighbors:
         :param coeff: correction, which is added to numenator and denominator (relevant for precise_computation=False)
         :param tune_bandwidth: whether tune bandwidth, of use fixed
@@ -97,6 +97,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
             current_f_hat = output["f_hat"]
             current_f1_hat = output["f1_hat"]
+            # better way to do that?
             if f_hat.shape[0] == 0:
                 f_hat = current_f_hat
                 f1_hat = current_f1_hat

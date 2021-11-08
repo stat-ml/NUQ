@@ -1,5 +1,20 @@
 import nuq
 import numpy as np
+import pytest
+
+@pytest.fixture
+def two_points_setup():
+    x_train = np.array([[1, 0], [0, 1]])
+    y_train = np.array([0, 0])
+    x_test = np.array([[0, 0], [1, 1]])
+
+    return x_train, y_train, x_test
+
+
+def test_two_points(two_points_setup):
+    x_train, y_train, x_test = two_points_setup
+    print(x_train)
+    assert False
 
 def test_one_point():
     x_train = np.array([[1, 0]])
