@@ -32,7 +32,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         kernel_type="RBF",
         n_neighbors=20,
         tune_bandwidth="classification",
-        bandwidth=1.0,
         use_centroids=False,
         sparse=True,
         verbose=False,
@@ -53,8 +52,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             bandwidth selection method, given by parameter string;
             for example, "classification:n_points=5;n_folds=10;n_samples=3",
             by default "classification"
-        bandwidth : float or np.ndarray[float], optional
-            bandwidth to use (may be a vector), by default 1.0
         use_centroids : bool, optional
             whether to represent each class as a centroid, by default False
         sparse : bool, optional
@@ -69,7 +66,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.log_pN = log_pN
         self.tune_bandwidth = tune_bandwidth
         self.kernel_type = kernel_type
-        self.bandwidth = bandwidth
         self.n_neighbors = n_neighbors
         self.use_centroids = use_centroids
         self.sparse = sparse
@@ -98,7 +94,12 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             raise ValueError("No such strategy")
         return bandwidth
 
-    def fit(self, X: np.ndarray, y: np.ndarray):
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        bandwidth: Optional[np.ndarray] = None,
+    ):
         """Prepares the model for inference:
           1. Computes centroid for each class [optional].
              This allows to reduce the number of points
@@ -113,6 +114,10 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             embeddings
         y : np.ndarray
             labels
+        bandwidth : np.ndarray, optional
+            bandwidth for each embedding, by default None;
+            should an array broadcastable with X
+            https://numpy.org/devdocs/user/basics.broadcasting.html
 
         Returns
         -------
@@ -141,11 +146,14 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         # 2. Tune kernel bandwidth
         if self.tune_bandwidth is not None:
-            self.bandwidth = self._tune_kernel(
-                X, y, strategy=self.tune_bandwidth
+            bandwidth = self._tune_kernel(X, y, strategy=self.tune_bandwidth)
+        bandwidth = np.array(bandwidth)
+        if len(bandwidth.shape) not in [0, 1, 2]:
+            raise ValueError(
+                "Expected `bandwidth` to be a scalar, 1D or 2D array, "
+                f"but got shape {bandwidth.shape} instead."
             )
-
-        self.log_kernel_ = get_log_kernel(self.kernel_type, self.bandwidth)
+        self.bandwidth_ref_ = ray.put(bandwidth)
 
         # 3. Construct kNN index on remote
 
@@ -206,10 +214,11 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             predict_log_proba_batch.remote,
             self.X_ref_,
             self.y_ref_,
+            self.bandwidth_ref_,
             X_ref,
             idx_ref,
             batch_size=batch_size,
-            log_kernel=self.log_kernel_,
+            kernel_type=self.kernel_type,
             log_prior=self.log_prior_ref_,
             log_pN=self.log_pN,
             log_prior_default=self.log_prior_default_,

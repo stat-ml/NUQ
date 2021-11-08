@@ -6,6 +6,7 @@ import hnswlib
 import numpy as np
 import pandas as pd
 import ray
+from ray.worker import get
 from scipy.special import logsumexp
 from sklearn.model_selection import StratifiedKFold
 from tqdm.auto import tqdm
@@ -175,11 +176,12 @@ def predict_log_proba_single(
 def predict_log_proba_batch(
     X_base: np.ndarray,
     y_base: np.ndarray,
+    bandwidth: np.ndarray,
     X_query: np.ndarray,
     idx_query: np.ndarray,
     i: int,
     batch_size: int,
-    log_kernel: Callable,
+    kernel_type: str,
     log_prior: np.ndarray,
     log_pN: float,
     log_prior_default: float,
@@ -194,6 +196,8 @@ def predict_log_proba_batch(
         Base data points (index database)
     y_base : np.ndarray[N]
         Corresponding labels of base data points
+    bandwidth: np.ndarray[N] or scalar
+        Array of bandwidthes or a single bandwidth
     X_query : np.ndarray[n, dim]
         Query of points to make prediction for
     idx_query : np.ndarray[n, k]
@@ -202,8 +206,8 @@ def predict_log_proba_batch(
         Batch start position
     batch_size : int
         Batch size, `X_query[i: i + batch_size]` are taken
-    log_kernel : Callable
-        Kernel function to be called: `log_kernel(X_base, X_query)`
+    kernel_type : str
+        Kernel to be used: `log_kernel(X_base, X_query)`, see `kernels.py`
     log_prior : np.ndarray[n_classes]
         Prior distribution on the classes
     log_pN : float
@@ -228,7 +232,6 @@ def predict_log_proba_batch(
     """
     predict_log_proba = partial(
         predict_log_proba_single,
-        log_kernel=log_kernel,
         log_prior=log_prior,
         log_pN=log_pN,
         log_prior_default=log_prior_default,
@@ -243,8 +246,12 @@ def predict_log_proba_batch(
     log_uncs = np.empty(size, dtype=np.float32)
 
     for j, (X, idx) in enumerate(zip(X_query[sl], idx_query[sl])):
+        log_kernel = get_log_kernel(
+            kernel_type,
+            bandwidth[idx] if len(bandwidth.shape) == 2 else bandwidth,
+        )
         preds[j], log_probas[j], log_uncs[j] = predict_log_proba(
-            X_base[idx], y_base[idx], X
+            X_base[idx], y_base[idx], X, log_kernel
         )
 
     return i, preds, log_probas, log_uncs
@@ -346,7 +353,7 @@ def optimal_bandwidth(
         # Compute score for every bandwidth
         scores = []
         for bandwidth in grid:
-            nuq.log_kernel_ = get_log_kernel(nuq.kernel_type, bandwidth)
+            nuq.bandwidth_ref_ = ray.put(np.array(bandwidth))
             scores.append(nuq.score(X_val, y_val))
         results[f"fold_{i}"] = scores
         del nuq
