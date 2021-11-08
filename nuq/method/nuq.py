@@ -18,8 +18,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                  bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=True):
         """
 
-        :param kernel_type:
-        :param method:
+        :param kernel_type: options are ['RBF', 'logistic', 'sigmoid']
+        :param method: options are ['all_data', 'hnsw']
         :param n_neighbors:
         :param coeff: correction, which is added to numenator and denominator (relevant for precise_computation=False)
         :param tune_bandwidth: whether tune bandwidth, of use fixed
@@ -36,7 +36,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.kernel_type = kernel_type
         self.bandwidth = bandwidth
         self.method = method
-        self.precise_computation = precise_computation
         self.n_neighbors = n_neighbors
         self.use_centroids = use_centroids
 
@@ -48,10 +47,9 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         :return: trained model
         """
         X, y = check_X_y(X, y)
-        self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
-                                                          precise_computation=self.precise_computation)
-        if self.precise_computation:
-            self.squared_kernel_int = np.log(self.squared_kernel_int)
+        self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth)
+        self.squared_kernel_int = np.log(self.squared_kernel_int)
+
         targets = y.reshape(-1)
         if not self.use_centroids:
             y_ohe = np.eye(np.max(y) + 1)[targets]
@@ -76,12 +74,9 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         if self.tune_bandwidth:
             self.bandwidth = tune_kernel(X=self.training_embeddings_, y=y, strategy=self.strategy, knn=self.fast_knn,
-                                         constructor=NuqClassifier, precise_computation=self.precise_computation,
-                                         n_neighbors=self.n_neighbors)
-            self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
-                                                              precise_computation=self.precise_computation)
-            if self.precise_computation:
-                self.squared_kernel_int = np.log(self.squared_kernel_int)
+                                         constructor=NuqClassifier, n_neighbors=self.n_neighbors)
+            self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth)
+            self.squared_kernel_int = np.log(self.squared_kernel_int)
         return self
 
     def _get_nw_estimates(self, X, batch_size):
@@ -98,11 +93,11 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                                                        method=self.method)
 
             output = get_nw_mean_estimate(targets=selected_labels, weights=weights, coeff=self.coeff,
-                                          precise_computation=self.precise_computation, n_clasees=self.n_classes,
-                                          use_uniform_prior=self.use_uniform_prior)
+                                          n_clasees=self.n_classes, use_uniform_prior=self.use_uniform_prior)
 
             current_f_hat = output["f_hat"]
             current_f1_hat = output["f1_hat"]
+            # better way to do that?
             if f_hat.shape[0] == 0:
                 f_hat = current_f_hat
                 f1_hat = current_f1_hat
@@ -127,37 +122,29 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             f_hat_x = f_hat_x_full
             f_hat_y_x = f_hat_y_x_full
             f1_hat_y_x = f1_hat_y_x_full
-            if not self.precise_computation:
-                sigma_hat_est = np.max(f_hat_y_x * f1_hat_y_x, axis=1, keepdims=True)
-                as_var = asymptotic_var(sigma_est=sigma_hat_est, f_est=f_hat_x, bandwidth=self.bandwidth,
-                                        n=self.n_neighbors)
 
-                Ue = half_gaussian_mean(asymptotic_var=as_var).squeeze()
-                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True).squeeze()
-                total_uncertainty = Ue + Ua
-            else:
-                sigma_hat_est = np.max(f_hat_y_x + f1_hat_y_x, axis=1, keepdims=True)
-                if not self.use_uniform_prior:
-                    broadcast_shape = (1, sigma_hat_est.shape[0], sigma_hat_est.shape[1])
-                    sigma_hat_est = logsumexp(np.concatenate(
-                        [sigma_hat_est[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)],
-                        axis=0), axis=0)
-                log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
-                                                bandwidth=self.bandwidth,
-                                                n=self.n_neighbors, dim=self.training_embeddings_.shape[1],
-                                                squared_kernel_int=self.squared_kernel_int)
+            sigma_hat_est = np.max(f_hat_y_x + f1_hat_y_x, axis=1, keepdims=True)
+            if not self.use_uniform_prior:
+                broadcast_shape = (1, sigma_hat_est.shape[0], sigma_hat_est.shape[1])
+                sigma_hat_est = logsumexp(np.concatenate(
+                    [sigma_hat_est[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)],
+                    axis=0), axis=0)
+            log_as_var = log_asymptotic_var(log_sigma_est=sigma_hat_est, log_f_est=f_hat_x,
+                                            bandwidth=self.bandwidth,
+                                            n=self.n_neighbors, dim=self.training_embeddings_.shape[1],
+                                            squared_kernel_int=self.squared_kernel_int)
 
-                Ue = log_half_gaussian_mean(asymptotic_var=log_as_var).squeeze()
-                Ua = np.min(f1_hat_y_x, axis=1, keepdims=True)
-                if not self.use_uniform_prior:
-                    Ua = logsumexp(
-                        np.concatenate([Ua[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)], axis=0),
-                        axis=0)
-                Ua = Ua.squeeze()
+            Ue = log_half_gaussian_mean(asymptotic_var=log_as_var).squeeze()
+            Ua = np.min(f1_hat_y_x, axis=1, keepdims=True)
+            if not self.use_uniform_prior:
+                Ua = logsumexp(
+                    np.concatenate([Ua[None], np.log(self.coeff) * np.ones(shape=broadcast_shape)], axis=0),
+                    axis=0)
+            Ua = Ua.squeeze()
 
-                # Ue = np.clip(Ue, a_min=-1e40, a_max=None)
+            # Ue = np.clip(Ue, a_min=-1e40, a_max=None)
 
-                total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0).squeeze()
+            total_uncertainty = logsumexp(np.concatenate([Ua[None], Ue[None]], axis=0), axis=0).squeeze()
 
             if Ue_total.shape[0] == 0:
                 Ue_total = Ue
@@ -193,8 +180,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                                               n_neighbors=self.n_neighbors,
                                               method=self.method)
             f_hat_x_current = p_hat_x(weights=weights, n=self.n_neighbors, h=self.bandwidth,
-                                      dim=self.training_embeddings_.shape[1],
-                                      precise_computation=self.precise_computation)
+                                      dim=self.training_embeddings_.shape[1])
             if f_hat_x.shape[0] == 0:
                 f_hat_x = f_hat_x_current
             else:

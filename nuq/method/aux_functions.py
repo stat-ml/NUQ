@@ -38,43 +38,31 @@ def get_kernel(name='RBF', **kwargs):
     if name == 'RBF':
         if len(bandwidth.shape) < 2:
             bandwidth = bandwidth[None]
-        if not kwargs.get('precise_computation'):
-            return multipliers[name], lambda x, y: np.exp(
-                -np.sum(np.square(x - y) / (2 * bandwidth ** 2), axis=-1)) / np.sqrt(
-                2 * np.pi) ** x.shape[1]
-        else:
-            return multipliers[name], lambda x, y: -np.sum(np.square((x - y) / bandwidth) / 2., axis=-1) - 0.5 * \
+
+        return multipliers[name], lambda x, y: -np.sum(np.square((x - y) / bandwidth) / 2., axis=-1) - 0.5 * \
                                                    x.shape[-1] * np.log(
                 2 * np.pi)
     if name == 'logistic':
-        if not kwargs.get('precise_computation'):
-            return multipliers[name], lambda x, y: np.prod(
-                1 / (np.exp((x - y) / bandwidth) + np.exp(-(x - y) / bandwidth) + 2), axis=-1)
-        else:
-            def log_logistic_kernel(x, y):
-                diff = x - y
-                output = -np.sum(
-                    logsumexp(np.concatenate(
-                        [(diff / bandwidth)[None], (-diff / bandwidth)[None],
-                         np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
-                        axis=0), axis=0), axis=-1)
-                return output
+        def log_logistic_kernel(x, y):
+            diff = x - y
+            output = -np.sum(
+                logsumexp(np.concatenate(
+                    [(diff / bandwidth)[None], (-diff / bandwidth)[None],
+                     np.log(2) * np.ones((1, x.shape[0], y.shape[1], x.shape[-1]))],
+                    axis=0), axis=0), axis=-1)
+            return output
 
-            return multipliers[name], log_logistic_kernel
+        return multipliers[name], log_logistic_kernel
     if name == 'sigmoid':
-        if not kwargs.get('precise_computation'):
-            return multipliers[name], lambda x, y: np.prod(
-                2 / (np.pi * (np.exp((x - y) / bandwidth) + np.exp((x - y) / bandwidth))), axis=-1)
-        else:
-            def log_sigmoid_function(x, y):
-                diff = x - y
-                output = x.shape[-1] * np.log(2 / np.pi) - np.sum(
-                    logsumexp(np.concatenate([(diff / bandwidth)[None],
-                                              (-diff / bandwidth)[None]], axis=0),
-                              axis=0),
-                    axis=-1)
-                return output
-            return multipliers[name], log_sigmoid_function
+        def log_sigmoid_function(x, y):
+            diff = x - y
+            output = x.shape[-1] * np.log(2 / np.pi) - np.sum(
+                logsumexp(np.concatenate([(diff / bandwidth)[None],
+                                          (-diff / bandwidth)[None]], axis=0),
+                          axis=0),
+                axis=-1)
+            return output
+        return multipliers[name], log_sigmoid_function
     else:
         raise ValueError("Wrong kernel name")
 
@@ -89,6 +77,7 @@ def compute_centroids(embeddings, labels):
 
 
 def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_labels, n_neighbors, method='hnsw'):
+    # expects valid number of nearest neighbors (0 < ... <= train_embeddings.shape[0])
     if len(current_embeddings.shape) < 2:
         current_embeddings = current_embeddings.reshape(1, -1)
     if method == 'hnsw' or method == 'all_data':
@@ -105,7 +94,7 @@ def compute_weights(knn, kernel, current_embeddings, train_embeddings, training_
     assert w_raw.shape == (current_embeddings.shape[0], n_neighbors, 1)
     return w_raw, selected_labels
 
-
+# maybe divide this function in two? and rename it
 def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=None, use_uniform_prior=False):
     log_numerator_pre = logsumexp(log_weights, axis=1, b=targets)
     if use_uniform_prior:
@@ -130,26 +119,21 @@ def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=No
     return f_hat, log_denomerator
 
 
-def get_nw_mean_estimate(targets, weights, precise_computation, n_clasees, use_uniform_prior, coeff=1.):
+def get_nw_mean_estimate(targets, weights, n_clasees, use_uniform_prior, coeff=1.):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
-    if not precise_computation:
-        f_hat = (np.sum(weights * targets, axis=1) + coeff) / (np.sum(weights, axis=1) + n_clasees * coeff)
-        f1_hat = 1. - f_hat
-        assert f_hat.shape == (weights.shape[0], targets.shape[-1])
-        assert f1_hat.shape == (weights.shape[0], targets.shape[-1])
-    else:
-        log_weights = weights
 
-        f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, n_classes=n_clasees,
-                                                   coeff=coeff, use_uniform_prior=use_uniform_prior)
-        f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees - 1.) * coeff,
-                                      n_classes=n_clasees,
-                                      log_denomerator=log_denomerator, use_uniform_prior=use_uniform_prior)
+    log_weights = weights
 
-        assert f_hat.shape == (log_weights.shape[0], targets.shape[-1])
-        assert f1_hat.shape == (log_weights.shape[0], targets.shape[-1])
+    f_hat, log_denomerator = compute_logsumexp(log_weights=log_weights, targets=targets, n_classes=n_clasees,
+                                               coeff=coeff, use_uniform_prior=use_uniform_prior)
+    f1_hat, _ = compute_logsumexp(log_weights=log_weights, targets=1 - targets, coeff=(n_clasees - 1.) * coeff,
+                                  n_classes=n_clasees,
+                                  log_denomerator=log_denomerator, use_uniform_prior=use_uniform_prior)
+
+    assert f_hat.shape == (log_weights.shape[0], targets.shape[-1])
+    assert f1_hat.shape == (log_weights.shape[0], targets.shape[-1])
     return {
         "f_hat": f_hat,
         "f1_hat": f1_hat
@@ -192,16 +176,13 @@ def get_nw_mean_estimate_regerssion(targets, weights, precise_computation):
 
 
 
-def p_hat_x(weights, n, h, precise_computation, dim):
+def p_hat_x(weights, n, h, dim):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     # np.prod!! instead of np.mean
-    if not precise_computation:
-        f_hat_x = np.sum(weights.squeeze(-1) / ((np.pi ** (dim / 2)) * n * np.prod(h)), axis=-1)
-    else:
-        log_weights = weights
-        dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
-        f_hat_x = -np.log(n) - dim_multiplier * np.sum(np.log(h)) + logsumexp(log_weights, axis=1)
+    log_weights = weights
+    dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
+    f_hat_x = -np.log(n) - dim_multiplier * np.sum(np.log(h)) + logsumexp(log_weights, axis=1)
 
     return f_hat_x
 
