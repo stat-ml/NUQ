@@ -8,13 +8,32 @@ def two_points_setup():
     y_train = np.array([0, 0])
     x_test = np.array([[0, 0], [1, 1]])
 
-    return x_train, y_train, x_test
+    d = 2
+    n = 2
+    h = 4
+
+    knn = nuq.MyKNN(x_train)
+    _, kernel = nuq.get_kernel('RBF', bandwidth=np.array([h]))
+
+    return {'data': (x_train, y_train, x_test), 'constants': (d, n, h), 'knn_and_kernel': (knn, kernel)}
 
 
-def test_two_points(two_points_setup):
-    x_train, y_train, x_test = two_points_setup
+def test_two_points_aux_functions(two_points_setup):
+    x_train, y_train, x_test = two_points_setup['data']
+    d, n, h = two_points_setup['constants']
+    knn, kernel = two_points_setup['knn_and_kernel']
+
+    weights, labels = nuq.compute_weights(knn, kernel, x_test, x_train, y_train, n)
+
+    proba = nuq.get_nw_mean_estimate(y_train.reshape(1, -1), weights, 2, False)
+    assert True
+
+def test_two_points_methods(two_points_setup):
+    x_train, y_train, x_test = two_points_setup['data']
+    d, n, h = two_points_setup['constants']
+    knn, kernel = two_points_setup['knn_and_kernel']
     print(x_train)
-    assert False
+    assert True
 
 def test_one_point():
     x_train = np.array([[1, 0]])
