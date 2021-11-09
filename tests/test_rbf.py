@@ -5,7 +5,7 @@ import pytest
 @pytest.fixture
 def two_points_setup():
     x_train = np.array([[1, 0], [0, 1]])
-    y_train = np.array([0, 0])
+    y_train = np.array([0, 1])
     x_test = np.array([[0, 0], [1, 1]])
 
     d = 2
@@ -24,9 +24,16 @@ def test_two_points_aux_functions(two_points_setup):
     knn, kernel = two_points_setup['knn_and_kernel']
 
     weights, labels = nuq.compute_weights(knn, kernel, x_test, x_train, y_train, n)
+    assert np.allclose(weights, (- d * np.log(np.sqrt(2 * np.pi)) - 1 / 2 / (h**2)) * np.ones_like(weights))
 
     proba = nuq.get_nw_mean_estimate(y_train.reshape(1, -1), weights, 2, False)
-    assert True
+    f_train, f1_train = proba['f_hat'], proba['f1_hat']
+    assert np.allclose(np.ones_like(f_train), np.exp(f_train) + np.exp(f1_train)), 'probabilities should sum up to 1'
+
+    proba = nuq.get_nw_mean_estimate((1 - y_train).reshape(1, -1), weights, 2, False)
+    f_reversed, f1_reversed = proba['f_hat'], proba['f1_hat']
+    assert np.allclose(f_train, f1_reversed), 'when switching labels, probas should be switched as well'
+    assert np.allclose(f_reversed, f1_train)
 
 def test_two_points_methods(two_points_setup):
     x_train, y_train, x_test = two_points_setup['data']
