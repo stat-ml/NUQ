@@ -120,6 +120,9 @@ def compute_logsumexp(log_weights, targets, coeff, n_classes, log_denomerator=No
 
 
 def get_nw_mean_estimate(targets, weights, n_clasees, use_uniform_prior, coeff=1.):
+    '''
+    :return: f_hat = log(probability), f1_hat = log(1 - probability)
+    '''
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
