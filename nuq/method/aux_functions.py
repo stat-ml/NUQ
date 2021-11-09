@@ -140,6 +140,9 @@ def get_nw_mean_estimate(targets, weights, n_clasees, use_uniform_prior, coeff=1
     }
 
 def get_nw_mean_estimate_regerssion(targets, weights, precise_computation):
+    '''
+    :return: f_hat = log(probability), f1_hat = log(1 - probability)
+    '''
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]

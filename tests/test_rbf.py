@@ -5,7 +5,7 @@ import pytest
 @pytest.fixture
 def two_points_setup():
     x_train = np.array([[1, 0], [0, 1]])
-    y_train = np.array([0, 0])
+    y_train = np.array([0, 1])
     x_test = np.array([[0, 0], [1, 1]])
 
     d = 2
@@ -15,7 +15,9 @@ def two_points_setup():
     knn = nuq.MyKNN(x_train)
     _, kernel = nuq.get_kernel('RBF', bandwidth=np.array([h]))
 
-    return {'data': (x_train, y_train, x_test), 'constants': (d, n, h), 'knn_and_kernel': (knn, kernel)}
+    # for model_config parameters are: kernel name, use_uniform_prior, method, tune_bandwidth, coeff and bandwidth
+    return {'data': (x_train, y_train, x_test), 'constants': (d, n, h), 'knn_and_kernel': (knn, kernel), \
+            'model_config': ('RBF', False, 'all_data', False, 0, np.array([h, h]))}
 
 
 def test_two_points_aux_functions(two_points_setup):
@@ -23,16 +25,32 @@ def test_two_points_aux_functions(two_points_setup):
     d, n, h = two_points_setup['constants']
     knn, kernel = two_points_setup['knn_and_kernel']
 
+    # compute_weights test
     weights, labels = nuq.compute_weights(knn, kernel, x_test, x_train, y_train, n)
+    assert np.allclose(weights, (- d * np.log(np.sqrt(2 * np.pi)) - 1 / 2 / (h**2)) * np.ones_like(weights))
 
+    # tests for probabilities
     proba = nuq.get_nw_mean_estimate(y_train.reshape(1, -1), weights, 2, False)
-    assert True
+    f_train, f1_train = proba['f_hat'], proba['f1_hat']
+    assert np.allclose(np.ones_like(f_train), np.exp(f_train) + np.exp(f1_train)), 'probabilities should sum up to 1'
+
+    proba = nuq.get_nw_mean_estimate((1 - y_train).reshape(1, -1), weights, 2, False)
+    f_reversed, f1_reversed = proba['f_hat'], proba['f1_hat']
+    assert np.allclose(f_train, f1_reversed), 'when switching labels, probas should be switched as well'
+    assert np.allclose(f_reversed, f1_train)
 
 def test_two_points_methods(two_points_setup):
     x_train, y_train, x_test = two_points_setup['data']
     d, n, h = two_points_setup['constants']
     knn, kernel = two_points_setup['knn_and_kernel']
     print(x_train)
+
+    # get_kde tests
+    ue_model = nuq.NuqClassifier(*two_points_setup['model_config'])
+    ue_model.fit(x_train, y_train)
+
+    kde = ue_model.get_kde(x_test)
+
     assert True
 
 def test_one_point():
