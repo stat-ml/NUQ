@@ -14,8 +14,7 @@ from ..utils.bandwidth_selection import tune_kernel
 
 class NuqClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.00001, tune_bandwidth=True,
-                 strategy='isj',
-                 bandwidth=np.array([1., ]), precise_computation=True, use_centroids=False, use_uniform_prior=True):
+                 strategy='isj', bandwidth=np.array([1., ]), use_centroids=False, use_uniform_prior=True):
         """
 
         :param kernel_type: options are ['RBF', 'logistic', 'sigmoid']
@@ -25,7 +24,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         :param tune_bandwidth: whether tune bandwidth, of use fixed
         :param strategy: tuning strategy. Options are ['isj', 'silverman', 'scott', 'classification']
         :param bandwidth: bandwidth. Should be a numpy array of size () or (dim, )
-        :param precise_computation: if True, everything is computed in terms of log
         :param use_centroids: whether use centroids or not
         :param use_uniform_prior: If true, we induce prior that at infinity we predict uniform distribution over classes
         """
@@ -265,7 +263,7 @@ class NuqRegressor(BaseEstimator):
                 self.squared_kernel_int = np.log(self.squared_kernel_int)
         return self
 
-    
+
     def _get_nw_estimates(self, X, batch_size):
         batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
         f_hat = np.array([])
@@ -280,7 +278,7 @@ class NuqRegressor(BaseEstimator):
                                                        method=self.method)
 
             output = get_nw_mean_estimate_regerssion(
-                targets=selected_labels, 
+                targets=selected_labels,
                 weights=weights,
                 precise_computation=self.precise_computation
             )
@@ -317,7 +315,7 @@ class NuqRegressor(BaseEstimator):
             else:
                 f_hat_x = np.concatenate([f_hat_x, f_hat_x_current])
         return f_hat_x
-        
+
 
     def predict_uncertainty(self, X, batch_size=50000, infinity=np.inf):
         batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
@@ -339,7 +337,7 @@ class NuqRegressor(BaseEstimator):
             Ue = as_var
             Ue[ininity_points] = infinity
             Ue[Ue > infinity] = infinity
-        
+
             Ua = sigma_est
             total_uncertainty = Ue + Ua
             total_uncertainty[ininity_points] = infinity

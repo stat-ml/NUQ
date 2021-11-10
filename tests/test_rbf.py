@@ -15,10 +15,10 @@ def two_points_setup():
     knn = nuq.MyKNN(x_train)
     _, kernel = nuq.get_kernel('RBF', bandwidth=np.array([h]))
 
-    # for model_config parameters are: kernel name, use_uniform_prior, method, tune_bandwidth, coeff and bandwidth
+    # for model_config parameters are in the following order
+        # kernel name, method, n_neighbors, coeff, tune_bandwidth, strategy, bandwidth, use_centroids, use_uniform_prior
     return {'data': (x_train, y_train, x_test), 'constants': (d, n, h), 'knn_and_kernel': (knn, kernel), \
-            'model_config': ('RBF', False, 'all_data', False, 0, np.array([h, h]))}
-
+            'model_config': ('RBF', 'all_data', 0, 0, False, 'isj', np.array([h, h]), False, False)}
 
 def test_two_points_aux_functions(two_points_setup):
     x_train, y_train, x_test = two_points_setup['data']
@@ -49,8 +49,14 @@ def test_two_points_methods(two_points_setup):
     ue_model = nuq.NuqClassifier(*two_points_setup['model_config'])
     ue_model.fit(x_train, y_train)
 
-    kde = ue_model.get_kde(x_test)
+    kde_whole = ue_model.get_kde(x_test)
+    kde_per_sample_batch = ue_model.get_kde(x_test, batch_size=1)
+    assert np.allclose(kde_whole, kde_per_sample_batch)
 
+    knn, kernel = two_points_setup['knn_and_kernel']
+    weights, labels = nuq.compute_weights(knn, kernel, x_test, x_train, y_train, n)
+
+    assert np.allclose(kde_whole, -np.log(n * h**d) + np.log(np.sum(np.exp(weights), axis=1)))
     assert True
 
 def test_one_point():

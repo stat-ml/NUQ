@@ -183,9 +183,9 @@ def p_hat_x(weights, n, h, dim):
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     # np.prod!! instead of np.mean
-    log_weights = weights
+    # make this neat? also why comment above?
     dim_multiplier = dim if h.shape == () or h.shape == (1,) else 1.
-    f_hat_x = -np.log(n) - dim_multiplier * np.sum(np.log(h)) + logsumexp(log_weights, axis=1)
+    f_hat_x = -np.log(n) - dim_multiplier * np.sum(np.log(h)) + logsumexp(weights, axis=1)
 
     return f_hat_x
 
