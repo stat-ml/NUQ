@@ -139,37 +139,31 @@ def get_nw_mean_estimate(targets, weights, n_clasees, use_uniform_prior, coeff=1
         "f1_hat": f1_hat
     }
 
-def get_nw_mean_estimate_regerssion(targets, weights, precise_computation):
+def get_nw_mean_estimate_regerssion(targets, weights):
     '''
     :return: f_hat = log(probability), f1_hat = log(1 - probability)
     '''
     if len(weights.shape) < 2:
         weights = weights.reshape(1, -1)[..., None]
     assert weights.shape[1] == targets.shape[1]
-    if not precise_computation:
-        denominator = (np.sum(weights, axis=1) + 1e-18)
-        f_hat = (np.sum(weights * targets, axis=1)) / denominator
-        f_sq_hat = np.sum(weights * targets ** 2, axis=1) / denominator
-        assert f_hat.shape == (weights.shape[0], targets.shape[-1])
-        assert f_sq_hat.shape == (weights.shape[0], targets.shape[-1])
-    else:
-        """
-        kernel is logarithmed yet
-        """
-        log_weights = weights
-        max_weights = np.max(log_weights).reshape(-1, 1)
 
-        denominator = np.sum(np.exp(log_weights - max_weights), axis=1)
-        numerator_lin = np.sum(np.exp(log_weights - max_weights) * targets, axis=1)
-        numerator_sq = np.sum(np.exp(log_weights - max_weights) * (targets ** 2), axis=1)
+    """
+    kernel is logarithmed yet - yet??
+    """
+    log_weights = weights
+    max_weights = np.max(log_weights).reshape(-1, 1)
 
-        f_hat = np.zeros(numerator_lin.shape)
-        f_sq_hat = np.zeros(numerator_sq.shape)
+    denominator = np.sum(np.exp(log_weights - max_weights), axis=1)
+    numerator_lin = np.sum(np.exp(log_weights - max_weights) * targets, axis=1)
+    numerator_sq = np.sum(np.exp(log_weights - max_weights) * (targets ** 2), axis=1)
 
-        non_zero_indices = (denominator > 0)
+    f_hat = np.zeros(numerator_lin.shape)
+    f_sq_hat = np.zeros(numerator_sq.shape)
 
-        f_hat[non_zero_indices] = numerator_lin[non_zero_indices] / denominator[non_zero_indices]
-        f_sq_hat[non_zero_indices] = numerator_sq[non_zero_indices] / denominator[non_zero_indices]
+    non_zero_indices = (denominator > 0)
+
+    f_hat[non_zero_indices] = numerator_lin[non_zero_indices] / denominator[non_zero_indices]
+    f_sq_hat[non_zero_indices] = numerator_sq[non_zero_indices] / denominator[non_zero_indices]
 
     return {
         "f_hat": f_hat,

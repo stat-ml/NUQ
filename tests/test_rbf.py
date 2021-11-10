@@ -39,13 +39,18 @@ def test_two_points_aux_functions(two_points_setup):
     assert np.allclose(f_train, f1_reversed), 'when switching labels, probas should be switched as well'
     assert np.allclose(f_reversed, f1_train)
 
+    # print("f_train: ", f_train)
+    # print("weights: ", weights[1])
+    # print("compare: ", weights[1] - np.log(np.sum(np.exp(weights), axis=1)))
+    # assert np.allclose(f_train, weights[1] - np.log(np.sum(np.exp(weights), axis=1)))
+
 def test_two_points_methods(two_points_setup):
     x_train, y_train, x_test = two_points_setup['data']
     d, n, h = two_points_setup['constants']
     knn, kernel = two_points_setup['knn_and_kernel']
     print(x_train)
 
-    # get_kde tests
+    # get_kde tests, check: let's say 7 points and batch size is 5
     ue_model = nuq.NuqClassifier(*two_points_setup['model_config'])
     ue_model.fit(x_train, y_train)
 
@@ -53,10 +58,19 @@ def test_two_points_methods(two_points_setup):
     kde_per_sample_batch = ue_model.get_kde(x_test, batch_size=1)
     assert np.allclose(kde_whole, kde_per_sample_batch)
 
-    knn, kernel = two_points_setup['knn_and_kernel']
-    weights, labels = nuq.compute_weights(knn, kernel, x_test, x_train, y_train, n)
+    # knn, kernel = two_points_setup['knn_and_kernel']
+    # weights, labels = nuq.compute_weights(knn, kernel, x_test, x_train, y_train, n)
+    #
+    # assert np.allclose(kde_whole, -np.log(n * h**d) + np.log(np.sum(np.exp(weights), axis=1)))
 
-    assert np.allclose(kde_whole, -np.log(n * h**d) + np.log(np.sum(np.exp(weights), axis=1)))
+    # _get_nw_estimates tests, also check for uneven n and batch_size
+    # _get_nw_estimates is basically a wrapper for compute_weights & get_nw_mean_estimate applied to batches
+    # proba = nuq._get_nw_mean_estimate(x_test, batch_size=n)
+    # f_train, f1_train = proba['f_hat'], proba['f1_hat']
+    # assert np.allclose(np.ones_like(f_train), np.exp(f_train) + np.exp(f1_train)), 'probabilities should sum up to 1'
+
+
+
     assert True
 
 def test_one_point():
@@ -132,3 +146,23 @@ def test_one_point():
     assert np.allclose(uncertainty_dict["epistemic"], epistemic_uncertainty), "epistemic uncertainty"
 
     # assert False
+
+if __name__ == '__main__':
+    test_one_point()
+    x_train = np.array([[1, 0], [0, 1]])
+    y_train = np.array([0, 1])
+    x_test = np.array([[0, 0], [1, 1]])
+
+    d = 2
+    n = 2
+    h = 4
+
+    knn = nuq.MyKNN(x_train)
+    _, kernel = nuq.get_kernel('RBF', bandwidth=np.array([h]))
+
+    # for model_config parameters are in the following order
+        # kernel name, method, n_neighbors, coeff, tune_bandwidth, strategy, bandwidth, use_centroids, use_uniform_prior
+    setup = {'data': (x_train, y_train, x_test), 'constants': (d, n, h), 'knn_and_kernel': (knn, kernel), \
+            'model_config': ('RBF', 'all_data', 0, 0, False, 'isj', np.array([h, h]), False, False)}
+    test_two_points_aux_functions(setup)
+    test_two_points_methods(setup)

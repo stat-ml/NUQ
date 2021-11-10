@@ -20,7 +20,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         :param kernel_type: options are ['RBF', 'logistic', 'sigmoid']
         :param method: options are ['all_data', 'hnsw']
         :param n_neighbors:
-        :param coeff: correction, which is added to numenator and denominator (relevant for precise_computation=False)
+        :param coeff: correction, which is added to numenator and denominator
         :param tune_bandwidth: whether tune bandwidth, of use fixed
         :param strategy: tuning strategy. Options are ['isj', 'silverman', 'scott', 'classification']
         :param bandwidth: bandwidth. Should be a numpy array of size () or (dim, )
@@ -158,12 +158,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         check_is_fitted(self)
         X = check_array(X)
         f_hat, f1_hat = self._get_nw_estimates(X=X, batch_size=batch_size)
-        probs = f_hat
-        probsm1 = f1_hat
 
-        output = {"probs": probs, "probsm1": probsm1}
-
-        return output
+        return {"probs": f_hat, "probsm1": f1_hat}
 
     def get_kde(self, X, batch_size=50000):
         batches = [(i, i + batch_size) for i in range(0, len(X), batch_size)]
@@ -194,17 +190,16 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 class NuqRegressor(BaseEstimator):
     def __init__(self, kernel_type="RBF", method="hnsw", n_neighbors=20, coeff=0.00001, tune_bandwidth=True,
                  strategy='isj',
-                 bandwidth=np.array([1., ]), precise_computation=True):
+                 bandwidth=np.array([1., ])):
         """
 
         :param kernel_type:
         :param method:
         :param n_neighbors:
-        :param coeff: correction, which is added to numenator and denominator (relevant for precise_computation=False)
+        :param coeff: correction, which is added to numenator and denominator
         :param tune_bandwidth: whether tune bandwidth, of use fixed
         :param strategy: tuning strategy. Options are ['isj', 'silverman', 'scott', 'classification']
         :param bandwidth: bandwidth. Should be a numpy array of size () or (dim, )
-        :param precise_computation: if True, everything is computed in terms of log
         :param use_centroids: whether use centroids or not
         :param use_uniform_prior: If true, we induce prior that at infinity we predict uniform distribution over classes
         """
@@ -214,7 +209,6 @@ class NuqRegressor(BaseEstimator):
         self.kernel_type = kernel_type
         self.bandwidth = bandwidth
         self.method = method
-        self.precise_computation = precise_computation
         self.n_neighbors = n_neighbors
 
 
@@ -227,10 +221,9 @@ class NuqRegressor(BaseEstimator):
         :return: trained model
         """
         X, y = check_X_y(X, y)
-        self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
-                                                          precise_computation=self.precise_computation)
-        if self.precise_computation:
-            self.squared_kernel_int = np.log(self.squared_kernel_int)
+        self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth)
+
+        self.squared_kernel_int = np.log(self.squared_kernel_int)
         # targets = y.reshape(-1)
         # if not self.use_centroids:
         #     y_ohe = np.eye(np.max(y) + 1)[targets]
@@ -255,12 +248,9 @@ class NuqRegressor(BaseEstimator):
 
         if self.tune_bandwidth:
             self.bandwidth = tune_kernel(X=self.training_embeddings_, y=y, strategy=self.strategy, knn=self.fast_knn,
-                                         constructor=NuqRegressor, precise_computation=self.precise_computation,
-                                         n_neighbors=self.n_neighbors)
-            self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth,
-                                                              precise_computation=self.precise_computation)
-            if self.precise_computation:
-                self.squared_kernel_int = np.log(self.squared_kernel_int)
+                                         constructor=NuqRegressor, n_neighbors=self.n_neighbors)
+            self.squared_kernel_int, self.kernel = get_kernel(self.kernel_type, bandwidth=self.bandwidth)
+            self.squared_kernel_int = np.log(self.squared_kernel_int)
         return self
 
 
@@ -279,8 +269,7 @@ class NuqRegressor(BaseEstimator):
 
             output = get_nw_mean_estimate_regerssion(
                 targets=selected_labels,
-                weights=weights,
-                precise_computation=self.precise_computation
+                weights=weights
             )
 
             current_f_hat = output["f_hat"]
@@ -308,8 +297,7 @@ class NuqRegressor(BaseEstimator):
                                               n_neighbors=self.n_neighbors,
                                               method=self.method)
             f_hat_x_current = p_hat_x(weights=weights, n=self.n_neighbors, h=self.bandwidth,
-                                      dim=self.training_embeddings_.shape[1],
-                                      precise_computation=self.precise_computation)
+                                      dim=self.training_embeddings_.shape[1])
             if f_hat_x.shape[0] == 0:
                 f_hat_x = f_hat_x_current
             else:
@@ -325,9 +313,10 @@ class NuqRegressor(BaseEstimator):
         for batch in batches:
             X_batch = X[batch[0]: batch[1]]
             f_hat_x = self.get_kde(X_batch, batch_size=batch_size)
-            if self.precise_computation:
-                ininity_points = f_hat_x < -20
-                f_hat_x = np.exp(f_hat_x)
+
+            ininity_points = f_hat_x < -20
+            f_hat_x = np.exp(f_hat_x)
+
             f_hat, f_sq_hat = self._get_nw_estimates(X_batch, batch_size=batch_size)
 
             sigma_est = f_sq_hat - f_hat ** 2
