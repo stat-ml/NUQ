@@ -8,31 +8,26 @@ from KDEpy.bw_selection import (
     scotts_rule,
     silvermans_rule,
 )
-from scipy.sparse import csr_matrix
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.preprocessing import LabelEncoder
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y
 from tqdm.auto import tqdm
 
 from .utils import (
     HNSWActor,
-    compute_centroids,
     optimal_bandwidth,
     parse_param,
-    predict_log_proba_batch,
+    predict_value_batch,
     to_iterator,
 )
 
 
-class NuqClassifier(BaseEstimator, ClassifierMixin):
+class NuqRegressor(BaseEstimator, RegressorMixin):
     def __init__(
         self,
         log_pN=0.0,
         kernel_type="RBF",
         n_neighbors=20,
-        tune_bandwidth="classification",
-        use_centroids=False,
-        sparse=True,
+        tune_bandwidth="regression",
         verbose=False,
         batch_size=1000,
         random_seed=42,
@@ -49,12 +44,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             number of nearest neighbors, by default 20
         tune_bandwidth : str, optional
             bandwidth selection method, given by parameter string;
-            for example, "classification:n_points=5;n_folds=10;n_samples=3",
-            by default "classification"
-        use_centroids : bool, optional
-            whether to represent each class as a centroid, by default False
-        sparse : bool, optional
-            return sparse probability matrix, by default True
+            for example, "regression:n_points=5;n_folds=10;n_samples=3",
+            by default "regression"
         verbose : bool, optional
             print logs and fitting/inference progress, by default False
         batch_size : int, optional
@@ -66,8 +57,6 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.tune_bandwidth = tune_bandwidth
         self.kernel_type = kernel_type
         self.n_neighbors = n_neighbors
-        self.use_centroids = use_centroids
-        self.sparse = sparse
         self.verbose = verbose
         self.batch_size = batch_size
         self.random_seed = random_seed
@@ -84,11 +73,11 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
                 lambda x: method(x[..., None]), axis=0, arr=X
             )
             print(f"  [{strategy.upper()}] {bandwidth = }")
-        elif "classification" in strategy:
+        elif "regression" in strategy:
             _, kwargs = parse_param(strategy)
             kwargs = dict(map(lambda x: (x[0], int(x[1])), kwargs.items()))
             bandwidth, score = optimal_bandwidth(
-                self, X, y, mode="classification", **kwargs
+                self, X, y, mode="regression", **kwargs
             )
             print(f"  [{strategy.upper()}] {bandwidth = } ({score = })")
         else:
@@ -102,11 +91,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         bandwidth: Optional[np.ndarray] = None,
     ):
         """Prepares the model for inference:
-          1. Computes centroid for each class [optional].
-             This allows to reduce the number of points
-             to the number of classes;
-          2. Constructs kNN index;
-          3. Tunes kernel bandwidth [optional].
+          1. Constructs kNN index;
+          2. Tunes kernel bandwidth [optional].
              Uses `self.strategy` to find the optimal bandwidth.
 
         Parameters
@@ -127,25 +113,12 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         """
 
         X, y = check_X_y(X, y)
-        self.label_encoder_ = LabelEncoder()
-        y = self.label_encoder_.fit_transform(y)
 
-        # 1. Compute centroid for each class
-        if self.use_centroids:
-            X, y = compute_centroids(embeddings=X, labels=y)
-        self.n_classes_ = y.max() + 1
+        # Get prior y and y^2 estimates
+        self.y_mean_ = y.mean()
+        self.y2_mean_ = (y ** 2).mean()
 
-        # Get prior class weights
-        _, counts = np.unique(y, return_counts=True)
-
-        log_prior = np.log(counts) - np.log(len(y))
-        self.class_default_ = log_prior.argmax()
-        self.log_prior_default_ = log_prior[self.class_default_] + self.log_pN
-
-        # Move log prior vector to shared memory
-        self.log_prior_ref_ = ray.put(log_prior)
-
-        # 2. Tune kernel bandwidth
+        # 1. Tune kernel bandwidth
         if self.tune_bandwidth is not None:
             bandwidth = self._tune_kernel(X, y, strategy=self.tune_bandwidth)
         bandwidth = np.array(bandwidth)
@@ -156,7 +129,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             )
         self.bandwidth_ref_ = ray.put(bandwidth)
 
-        # 3. Construct kNN index on remote
+        # 2. Construct kNN index on remote
 
         # Move preprocessed input to shared memory
         self.X_ref_, self.y_ref_ = ray.put(X), ray.put(y)
@@ -169,7 +142,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         return self
 
-    def predict_proba(
+    def predict(
         self,
         X: np.ndarray,
         return_uncertainty: Optional[str] = None,
@@ -184,8 +157,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         return_uncertainty : str, optional
             whether to return probabilities with or without uncertainty
               - None: no uncertainty is returned
-              - "aleatoric": log (1 - p_pred)
-              - "epistemic": log (tau^2) without the normalizing factor, check NUQ paper
+              - "aleatoric": log(var(x))
+              - "epistemic": log(tau^2) without the normalizing factor, check NUQ paper
 
         batch_size : int, optional
             number of samples per batch, by default None
@@ -211,8 +184,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         X_ref = ray.put(X)
         idx_ref = self.index_.knn_query.remote(X_ref, return_dist=False)
 
-        predict_log_proba_handle = partial(
-            predict_log_proba_batch.remote,
+        predict_value_handle = partial(
+            predict_value_batch.remote,
             self.X_ref_,
             self.y_ref_,
             self.bandwidth_ref_,
@@ -220,16 +193,15 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             idx_ref,
             batch_size=batch_size,
             kernel_type=self.kernel_type,
-            log_prior=self.log_prior_ref_,
             log_pN=self.log_pN,
-            log_prior_default=self.log_prior_default_,
-            class_default=self.class_default_,
-            return_uncertainty=(return_uncertainty == "epistemic"),
+            y_mean=self.y_mean_,
+            y2_mean=self.y2_mean_,
+            return_uncertainty=(return_uncertainty is not None),
         )
 
         res_refs = []
         for i in range(0, X.shape[0], batch_size):
-            res_refs.append(predict_log_proba_handle(i))
+            res_refs.append(predict_value_handle(i))
 
         res = []
         order = []
@@ -243,55 +215,11 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         # Preserve the batch ordering
         res = [res[i] for i in np.argsort(order)]
-        pred, log_proba, log_unc = map(np.concatenate, zip(*res))
-
-        indptr = np.arange(pred.shape[0] + 1, dtype=np.int64)
-        indices = pred
-        data = np.exp(log_proba)
-
-        probs = csr_matrix(
-            (data, indices, indptr), shape=(X.shape[0], self.n_classes_)
-        )
-        if not self.sparse:
-            probs = probs.toarray()
+        y_pr, log_aleatoric, log_epistemic = map(np.concatenate, zip(*res))
 
         if return_uncertainty is None:
-            return probs
+            return y_pr
         elif return_uncertainty == "epistemic":
-            return probs, log_unc
+            return y_pr, log_aleatoric
         elif return_uncertainty == "aleatoric":
-            return probs, np.log1p(-np.exp(log_proba))
-
-    def predict(self, X: np.ndarray, return_uncertainty: Optional[str] = None):
-        """Predicts class for each entry and corresponding
-        uncertainties (optional).
-
-        Parameters
-        ----------
-        X : np.ndarray
-            array of shape [N, d]; each row is a vector to predict probabilities for
-        return_uncertainty : bool, optional
-            whether to return probabilities with or without uncertainty
-
-        Returns
-        -------
-        probs : Any[np.ndarray, scipy.sparse.csr_matrix]
-            sparse/dense matrix of probabilities per sample
-        return_uncertainty : str, optional
-            whether to return probabilities with or without uncertainty
-              - None: no uncertainty is returned
-              - "aleatoric": log (1 - p_pred)
-              - "epistemic": log (tau^2) without the normalizing factor, check NUQ paper
-        """
-
-        probs = self.predict_proba(X, return_uncertainty=return_uncertainty)
-        if return_uncertainty:
-            probs, uncertainty = probs
-        probs = self.label_encoder_.inverse_transform(
-            np.array(probs.argmax(axis=1)).ravel()
-        )
-
-        if return_uncertainty is None:
-            return probs
-        else:
-            return probs, uncertainty
+            return y_pr, log_epistemic

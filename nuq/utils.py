@@ -8,7 +8,7 @@ import pandas as pd
 import ray
 from ray.worker import get
 from scipy.special import logsumexp
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold
 from tqdm.auto import tqdm
 
 from . import kernels
@@ -76,9 +76,9 @@ def predict_log_proba_single(
         log_pN : float
             Prior importance hyperparameter
         log_prior_default : float
-            Highest priot probability
+            Highest prior probability
         class_default : int
-            Class with highest priot probability
+            Class with highest prior probability
         return_uncertainty : bool, optional
             Whether to compute uncertainty, by default False
 
@@ -215,7 +215,7 @@ def predict_log_proba_batch(
     log_prior_default : float
         Highest prior probability
     class_default : int
-        Class with highest priot probability
+        Class with highest prior probability
     return_uncertainty : bool, optional
         Whether to compute uncertainty, by default False
 
@@ -292,6 +292,7 @@ def optimal_bandwidth(
     n_folds: int = 10,
     n_samples: int = 3,
     verbose: int = 0,
+    mode: str = "classification",
 ) -> Tuple[float, float]:
     """Selects an optimal bandwidth via cross validation.
 
@@ -311,14 +312,26 @@ def optimal_bandwidth(
         number of folds to compute score on, by default 3
     verbose : int, optional
         level of verbosity (show progressbar), by default 0
-
+    mode : str, optional
+        used to determine the cross-validation splitter type,
+        by default "classification"
     Returns
     -------
     best_bandwidth : float
     best_score : float
     """
     ModelClass = type(model)
-    skf = StratifiedKFold(
+    allowed = ["classification", "regression"]
+    if mode not in allowed:
+        raise ValueError(
+            "Unsupported `mode` value. Expected one of"
+            f"['classification', 'regression'], but received {mode}"
+        )
+    elif mode == "classification":
+        splitter = StratifiedKFold
+    elif mode == "regression":
+        splitter = KFold
+    skf = splitter(
         n_splits=n_folds, shuffle=True, random_state=model.random_seed
     )
     it = skf.split(X, y)
@@ -417,3 +430,153 @@ def parse_param(param_string: str) -> Tuple[str, Dict[str, str]]:
     vals_strings = filter(None, vals_string.split(";"))
     vals = [v.split("=", maxsplit=1) for v in vals_strings]
     return name, dict(vals)
+
+
+def predict_value_single(
+    X_base: np.ndarray,
+    y_base: np.ndarray,
+    X_query: np.ndarray,
+    log_kernel: Callable,
+    log_pN: float,
+    y_mean: float,
+    y2_mean: float,
+    return_uncertainty: bool = False,
+) -> Tuple[int, float, float]:
+    """Predict uncertainty for a single entry `X_query` given its
+    neighbors (`base`) and their labels.
+
+    Parameters
+    ----------
+        X_base : np.ndarray[k, dim] of floats
+            Neighbors of the query point
+        y_base : np.ndarray[k]
+            Corresponding labels
+        X_query : np.ndarray[dim]
+            A single point to make prediction for
+        log_kernel : Callable
+            Kernel function to be called: `log_kernel(X_base, X_query)`
+        log_pN : float
+            Prior importance hyperparameter
+        y_mean : float
+            point estimate of value
+        y2_mean : float
+            point estimate of the squared value
+        return_uncertainty : bool, optional
+            Whether to compute uncertainty, by default False
+
+    Returns
+    -------
+        pred : int
+            Class with top probability
+        log_aleatoric : float
+            Optional log aleatoric uncertainty, -1. by default
+        log_epistemic : float
+            Optional log epistemic uncertainty, -1. by default
+    """
+    # Compute kernel values for each pair of points
+    log_kernel_vals = log_kernel(X_base, X_query)
+
+    # Compute denominator
+    log_denominator = logsumexp(
+        np.r_[
+            log_kernel_vals,
+            log_pN,
+        ]
+    )
+
+    # Compute the weights
+    weights = np.exp(log_kernel_vals - log_denominator)
+    weights_bias = np.exp(log_pN - log_denominator)
+
+    # Apply the weights to compute the estimates
+    y_pr = (y_base * weights).sum() + y_mean * weights_bias
+    if not return_uncertainty:
+        return y_pr, -1.0, -1.0
+
+    # Compute the aleatoric and epistemic uncertainties
+    y2_pr = (y_base ** 2 * weights).sum() + y2_mean * weights_bias
+    log_variance = np.log(y2_pr - y_pr ** 2)
+    log_epistemic = log_variance - log_denominator
+
+    return y_pr, log_variance, log_epistemic
+
+
+@ray.remote
+def predict_value_batch(
+    X_base: np.ndarray,
+    y_base: np.ndarray,
+    bandwidth: np.ndarray,
+    X_query: np.ndarray,
+    idx_query: np.ndarray,
+    i: int,
+    batch_size: int,
+    kernel_type: str,
+    log_pN: float,
+    y_mean: float,
+    y2_mean: float,
+    return_uncertainty: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Runs prediction pipeline on a single batch.
+
+    Parameters
+    ----------
+    X_base : np.ndarray[N, dim] of floats
+        Base data points (index database)
+    y_base : np.ndarray[N]
+        Corresponding labels of base data points
+    bandwidth: np.ndarray[N] or scalar
+        Array of bandwidthes or a single bandwidth
+    X_query : np.ndarray[n, dim]
+        Query of points to make prediction for
+    idx_query : np.ndarray[n, k]
+        Indices of neighbors for each `X_query` entry
+    i : int
+        Batch start position
+    batch_size : int
+        Batch size, `X_query[i: i + batch_size]` are taken
+    kernel_type : str
+        Kernel to be used: `log_kernel(X_base, X_query)`, see `kernels.py`
+    log_pN : float
+        Prior importance hyperparameter
+    y_mean : float
+        point estimate of value
+    y2_mean : float
+        point estimate of the squared value
+    return_uncertainty : bool, optional
+        Whether to compute uncertainty, by default False
+
+    Returns
+    -------
+        i : int
+            Batch start position, for order recovery
+        pred : np.ndarray[int]
+            Predicted class for each entry
+        log_aleatoric : np.ndarray[float]
+            Optional log aleatoric uncertainty for each entry, -1. by default
+        log_epistemic : np.ndarray[float]
+            Optional log epistemic uncertainty for each entry, -1. by default
+    """
+    predict_value = partial(
+        predict_value_single,
+        log_pN=log_pN,
+        y_mean=y_mean,
+        y2_mean=y2_mean,
+        return_uncertainty=return_uncertainty,
+    )
+    sl = np.s_[i : i + batch_size]
+    size = X_query[sl].shape[0]
+
+    preds = np.empty(size, dtype=np.float32)
+    log_aleatoric = np.empty(size, dtype=np.float32)
+    log_epistemic = np.empty(size, dtype=np.float32)
+
+    for j, (X, idx) in enumerate(zip(X_query[sl], idx_query[sl])):
+        log_kernel = get_log_kernel(
+            kernel_type,
+            bandwidth[idx] if len(bandwidth.shape) == 2 else bandwidth,
+        )
+        preds[j], log_aleatoric[j], log_epistemic[j] = predict_value(
+            X_base[idx], y_base[idx], X, log_kernel
+        )
+
+    return i, preds, log_aleatoric, log_epistemic

@@ -18,12 +18,22 @@ This repository implements an uncertainty estimation kernel method based on Nada
 ## How to use
 See [examples](examples/example.ipynb) for more details.
 
+### Classification
 ```python
 from nuq import NuqClassifier
 
 nuq = NuqClassifier()
 nuq.fit(X_train, y_train)
-preds, uncs = nuq.predict(X_test, return_uncertainty="epistemic")
+preds, log_uncs = nuq.predict(X_test, return_uncertainty="epistemic")
+```
+
+### Regression
+```python
+from nuq import NuqRegressor
+
+nuq = NuqRegressor()
+nuq.fit(X_train, y_train)
+preds, log_uncs = nuq.predict(X_test, return_uncertainty="epistemic")
 ```
 
 ## Installation
