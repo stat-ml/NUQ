@@ -170,9 +170,6 @@ ue = ue_mnist
 ue_entropy = entropy(preds)
 ue_ensemble = ensemble.ue(images)
 
-
-
-
 nuq = NuqClassifier(tune_bandwidth='classification', n_neighbors=100)
 nuq.fit(X=preds_train, y=y_train)
 
@@ -219,12 +216,13 @@ def splits(ues):
     ys = [1] + [np.mean(sorted_corrects[:num]) for num in xs[1:]]
     return ys
 
-font = { #'family' : 'normal',
-        # 'weight' : 'bold',
-        'weight': 'normal',
-        'size': 18}
+font = {
+    'weight': 'normal',
+    'size': 18
+}
+
 matplotlib.rc('font', **font)
-plt.figure(figsize=(6, 5), dpi=150)
+plt.figure(figsize=(9, 8), dpi=150)
 linewidth = 3
 plt.subplots_adjust(left=0.15, bottom=0.13, right=0.95)
 plt.title('Accuracy, MNIST rotated, SN')
@@ -235,7 +233,6 @@ plt.plot(xs, splits(ue_entropy.numpy()), label='Entropy', linestyle=':', color='
 plt.plot(xs, splits(ues_test_ddu), label='DDU', linestyle='-.', color='tab:cyan', linewidth=linewidth)
 plt.plot(xs, splits(ue_ensemble), label='Ensemble (m=5)', linestyle='-.', color='tab:orange', linewidth=linewidth)
 plt.plot(xs, splits(ue_nuq), label='NUQ', linestyle='-.', color='tab:purple', linewidth=linewidth)
-plt.legend()
+plt.legend(loc='upper right')
 plt.show()
 
-import ipdb; ipdb.set_trace()
