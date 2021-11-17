@@ -3,7 +3,7 @@ repos:
     rev: v4.0.1  # Use the ref you want to point at
     hooks:
       - id: check-added-large-files
-        args: ['--maxkb=500']
+        args: ['--maxkb=700']
       - id: check-yaml
       - id: end-of-file-fixer
       - id: requirements-txt-fixer
