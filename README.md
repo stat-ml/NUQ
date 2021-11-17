@@ -16,7 +16,7 @@ This repository implements an uncertainty estimation kernel method based on Nada
    ```
 
 ## How to use
-See [examples](examples/example.ipynb) for more details.
+See [classification](examples/classification.ipynb) and [regression](examples/regression.ipynb) examples for more details.
 
 ### Classification
 ```python
