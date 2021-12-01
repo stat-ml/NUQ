@@ -357,14 +357,15 @@ def optimal_bandwidth(
         # If grid is not set yet, initialize it
         if grid is None:
             # Compute squared distances
-            _, dists2 = ray.get(
+            _, squared_dists = ray.get(
                 nuq.index_.knn_query.remote(nuq.X_ref_, return_dist=True)
             )
             # Exclude zero distances between point and itself
-            dists = np.sqrt(dists2)[:, 1:]
-            left, right = dists.min(), dists.max()
+            dists = np.sqrt(squared_dists)[:, 1:]
+            min_dists = dists[:, 0]
+            left, right = min_dists[min_dists!=0].min(), dists.max()
 
-            grid = np.logspace(np.log(left), np.log(right), n_points)
+            grid = np.logspace(np.log10(left), np.log10(right), n_points)
 
         # Compute score for every bandwidth
         scores = []
