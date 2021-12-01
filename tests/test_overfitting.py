@@ -1,10 +1,11 @@
 import numpy as np
-from sklearn.model_selection import train_test_split
 
 from nuq import NuqClassifier, NuqRegressor
 
 
 def test_overfitting_classifier():
+    np.random.seed(42)
+
     # Number of points
     N = 500
     # Number of classes
@@ -23,6 +24,8 @@ def test_overfitting_classifier():
 
 
 def test_overfitting_regressor():
+    np.random.seed(42)
+
     # Number of points
     N = 500
     # Dimensionality
