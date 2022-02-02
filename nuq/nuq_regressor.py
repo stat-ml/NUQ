@@ -1,3 +1,4 @@
+import math
 from functools import partial
 from typing import Optional
 
@@ -8,15 +9,18 @@ from KDEpy.bw_selection import (
     scotts_rule,
     silvermans_rule,
 )
+from scipy.special import logsumexp
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.utils.validation import check_X_y
 from tqdm.auto import tqdm
 
 from .utils import (
     HNSWActor,
+    get_log_normalizer,
     optimal_bandwidth,
     parse_param,
     predict_value_batch,
+    ritter_bounding_sphere,
     to_iterator,
 )
 
@@ -60,6 +64,9 @@ class NuqRegressor(BaseEstimator, RegressorMixin):
         self.verbose = verbose
         self.batch_size = batch_size
         self.random_seed = random_seed
+
+        # Dataset radius is lazily computed
+        self.r = None
 
     def _tune_kernel(self, X, y, strategy="isj"):
         standard_strategies = {
@@ -113,6 +120,7 @@ class NuqRegressor(BaseEstimator, RegressorMixin):
         """
 
         X, y = check_X_y(X, y)
+        self.N, self.d = X.shape
 
         # Get prior y and y^2 estimates
         self.y_mean_ = y.mean()
@@ -147,6 +155,7 @@ class NuqRegressor(BaseEstimator, RegressorMixin):
         X: np.ndarray,
         return_uncertainty: Optional[str] = None,
         batch_size: Optional[int] = None,
+        log_scale: Optional[float] = 0.0,
     ):
         """Predicts probability distribution between classes for each input X.
 
@@ -170,7 +179,7 @@ class NuqRegressor(BaseEstimator, RegressorMixin):
         uncertainty : np.ndarray [optional]
             corresponding uncertainties if `return_uncertainty` is not None
         """
-        allowed = ["aleatoric", "epistemic"]
+        allowed = ["aleatoric", "epistemic", "total"]
         if not (return_uncertainty is None or return_uncertainty in allowed):
             raise ValueError(
                 "Unsupported `return_uncertainty` value. Expected one of"
@@ -179,6 +188,10 @@ class NuqRegressor(BaseEstimator, RegressorMixin):
 
         if batch_size is None:
             batch_size = self.batch_size
+
+        # If radius is not yet computed
+        if (return_uncertainty == "total") and (self.r is None):
+            _, self.r = ritter_bounding_sphere(X)
 
         # Move query to the shared memory
         X_ref = ray.put(X)
@@ -220,6 +233,26 @@ class NuqRegressor(BaseEstimator, RegressorMixin):
         if return_uncertainty is None:
             return y_pr
         elif return_uncertainty == "epistemic":
-            return y_pr, log_aleatoric
-        elif return_uncertainty == "aleatoric":
             return y_pr, log_epistemic
+        elif return_uncertainty == "aleatoric":
+            return y_pr, log_aleatoric
+        elif return_uncertainty == "total":
+            log_C = get_log_normalizer(
+                self.log_pN - math.log(self.N), self.r, self.d
+            )
+            log_total = logsumexp(
+                np.stack(
+                    [
+                        log_aleatoric,
+                        log_scale
+                        + math.log(2)
+                        + 0.5 * math.log(2 / math.pi)
+                        + log_epistemic
+                        + log_C,
+                    ],
+                    axis=1,
+                ),
+                axis=-1,
+            )
+
+            return y_pr, log_total

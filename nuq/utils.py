@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict
 from functools import partial
 from typing import Callable, Dict, Optional, Tuple, Union
@@ -7,7 +8,7 @@ import numpy as np
 import pandas as pd
 import ray
 from ray.worker import get
-from scipy.special import logsumexp
+from scipy.special import erf, loggamma, logsumexp
 from sklearn.model_selection import KFold, StratifiedKFold
 from tqdm.auto import tqdm
 
@@ -363,7 +364,7 @@ def optimal_bandwidth(
             # Exclude zero distances between point and itself
             dists = np.sqrt(squared_dists)[:, 1:]
             min_dists = dists[:, 0]
-            left, right = min_dists[min_dists!=0].min(), dists.max()
+            left, right = min_dists[min_dists != 0].min(), dists.max()
 
             grid = np.logspace(np.log10(left), np.log10(right), n_points)
 
@@ -584,3 +585,99 @@ def predict_value_batch(
         )
 
     return i, preds, log_aleatoric, log_epistemic
+
+
+def get_distant(X: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """Returns the point from the set X that is most distant to the point x.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        The set of all points.
+    x : np.ndarray
+        Points to count distance from.
+
+    Returns
+    -------
+    y : np.ndarray
+        The point most distant from x.
+    """
+    dists2 = np.sum((X - x[None, :]) ** 2, axis=-1)
+    return X[np.argmax(dists2), :]
+
+
+def ritter_bounding_sphere(
+    X: np.ndarray, eps: float = 1e-5
+) -> Tuple[np.ndarray, float]:
+    """Compute minimal bounding sphere for the set of points X.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Array of N points in d-dimnsional space (shape: [N, d])
+    eps : float, optional
+        Tolerance; stop if the relative radius change is less than `eps`, by default 1e-5
+
+    Returns
+    -------
+    c : np.ndarray
+        Centre of the bounding sphere.
+    r : float
+        Radius of the sphere.
+    """
+
+    # Initialize
+    x = X[0, :]
+    y = get_distant(X, x)
+    z = get_distant(X, y)
+
+    c = (y + z) / 2
+    r = np.linalg.norm(y - c)
+
+    while True:
+        t = get_distant(X, c)
+        dt = c - t
+        dist = np.linalg.norm(dt)
+        n = dt / dist
+        p = t + n * (dist + r)
+
+        c = (t + p) / 2
+        r_old = r
+        r = np.linalg.norm(p - c)
+
+        if (r - r_old) / r < eps:
+            break
+
+    return c, r
+
+
+def get_log_normalizer(log_p: float, r: float, d: int) -> float:
+    """Get the normalizer of the
+
+    Parameters
+    ----------
+    log_p : float
+        Prior weight factor.
+    r : float
+        Radius of the kernel support.
+    d : int
+        Kernel dimension.
+
+    Returns
+    -------
+    log_C : float
+        Kernel normalizer (log scale).
+    """
+    log_pi = math.log(math.pi)
+    log_part1 = d / 2 * log_pi + d * math.log(erf(r))
+    log_part2 = (
+        log_p
+        + (d / 2 + 1) * math.log(2)
+        + d / 2 * log_pi
+        + d * math.log(erf(r / 2 ** 0.5))
+    )
+    log_part3 = (
+        2 * log_p + d / 2 * log_pi + d * math.log(r) - loggamma(d / 2 + 1)
+    )
+
+    return logsumexp([log_part1, log_part2, log_part3])

@@ -1,3 +1,4 @@
+import math
 from functools import partial
 from typing import Optional
 
@@ -9,6 +10,7 @@ from KDEpy.bw_selection import (
     silvermans_rule,
 )
 from scipy.sparse import csr_matrix
+from scipy.special import logsumexp
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.validation import check_X_y
@@ -17,9 +19,11 @@ from tqdm.auto import tqdm
 from .utils import (
     HNSWActor,
     compute_centroids,
+    get_log_normalizer,
     optimal_bandwidth,
     parse_param,
     predict_log_proba_batch,
+    ritter_bounding_sphere,
     to_iterator,
 )
 
@@ -71,6 +75,9 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.verbose = verbose
         self.batch_size = batch_size
         self.random_seed = random_seed
+
+        # Dataset radius is lazily computed
+        self.r = None
 
     def _tune_kernel(self, X, y, strategy="isj"):
         standard_strategies = {
@@ -127,6 +134,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         """
 
         X, y = check_X_y(X, y)
+        self.N, self.d = X.shape
         self.label_encoder_ = LabelEncoder()
         y = self.label_encoder_.fit_transform(y)
 
@@ -174,6 +182,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         X: np.ndarray,
         return_uncertainty: Optional[str] = None,
         batch_size: Optional[int] = None,
+        log_scale: Optional[float] = 0.0,
     ):
         """Predicts probability distribution between classes for each input X.
 
@@ -186,6 +195,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
               - None: no uncertainty is returned
               - "aleatoric": log (1 - p_pred)
               - "epistemic": log (tau^2) without the normalizing factor, check NUQ paper
+              - "total:scale=0.2": log(aleatoric + scale * epistemic), scale should be provided
 
         batch_size : int, optional
             number of samples per batch, by default None
@@ -197,7 +207,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         uncertainty : np.ndarray [optional]
             corresponding uncertainties if `return_uncertainty` is not None
         """
-        allowed = ["aleatoric", "epistemic"]
+        allowed = ["aleatoric", "epistemic", "total"]
         if not (return_uncertainty is None or return_uncertainty in allowed):
             raise ValueError(
                 "Unsupported `return_uncertainty` value. Expected one of"
@@ -206,6 +216,10 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         if batch_size is None:
             batch_size = self.batch_size
+
+        # If radius is not yet computed
+        if (return_uncertainty == "total") and (self.r is None):
+            _, self.r = ritter_bounding_sphere(X)
 
         # Move query to the shared memory
         X_ref = ray.put(X)
@@ -255,12 +269,35 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         if not self.sparse:
             probs = probs.toarray()
 
+        log_aleatoric = np.log1p(-np.exp(log_proba))
+        log_epistemic = log_unc
+
         if return_uncertainty is None:
             return probs
         elif return_uncertainty == "epistemic":
-            return probs, log_unc
+            return probs, log_epistemic
         elif return_uncertainty == "aleatoric":
-            return probs, np.log1p(-np.exp(log_proba))
+            return probs, log_aleatoric
+        elif return_uncertainty == "total":
+            log_C = get_log_normalizer(
+                self.log_pN - math.log(self.N), self.r, self.d
+            )
+            log_total = logsumexp(
+                np.stack(
+                    [
+                        log_aleatoric,
+                        log_scale
+                        + math.log(2)
+                        + 0.5 * math.log(2 / math.pi)
+                        + log_epistemic
+                        + log_C,
+                    ],
+                    axis=1,
+                ),
+                axis=-1,
+            )
+
+            return probs, log_total
 
     def predict(self, X: np.ndarray, return_uncertainty: Optional[str] = None):
         """Predicts class for each entry and corresponding
