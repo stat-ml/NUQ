@@ -53,7 +53,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             number of nearest neighbors, by default 20
         tune_bandwidth : str, optional
             bandwidth selection method, given by parameter string;
-            for example, "classification:n_points=5;n_folds=10;n_samples=3",
+            for example, "classification:n_points=5;n_folds=10;n_samples=3;verbose=1",
             by default "classification"
         use_centroids : bool, optional
             whether to represent each class as a centroid, by default False
