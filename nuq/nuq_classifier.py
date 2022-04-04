@@ -36,6 +36,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         verbose=False,
         batch_size=1000,
         random_seed=42,
+        calculate_sigma="kde",
+        sigma=None
     ):
         """Constructs an instance of NuqClassifier.
 
@@ -71,6 +73,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.verbose = verbose
         self.batch_size = batch_size
         self.random_seed = random_seed
+        self.calculate_sigma = calculate_sigma
+        self.sigma = sigma
 
     def _tune_kernel(self, X, y, strategy="isj"):
         standard_strategies = {
@@ -224,6 +228,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             log_pN=self.log_pN,
             log_prior_default=self.log_prior_default_,
             class_default=self.class_default_,
+            nuq=self,
             return_uncertainty=(return_uncertainty == "epistemic"),
         )
 

@@ -11,6 +11,8 @@ from scipy.special import logsumexp
 from sklearn.model_selection import KFold, StratifiedKFold
 from tqdm.auto import tqdm
 
+import torch
+
 from . import kernels
 
 
@@ -56,6 +58,8 @@ def predict_log_proba_single(
     log_pN: float,
     log_prior_default: float,
     class_default: int,
+    nuq,
+    softmax_probas = None,
     return_uncertainty: bool = False,
 ) -> Tuple[int, float, Optional[float]]:
     """Predict uncertainty for a single entry `X_query` given its
@@ -91,85 +95,194 @@ def predict_log_proba_single(
         log_unc : float
             Optional log uncertainty, -1. by default
     """
-    # Create list of all present classes and their corresponding positions
-    classes_cur, encoded = np.unique(y_base, return_inverse=True)
+    if nuq.calculate_sigma == "kde":
+        # Create list of all present classes and their corresponding positions
+        classes_cur, encoded = np.unique(y_base, return_inverse=True)
 
-    # Compute kernel values for each pair of points
-    log_kernel_vals = log_kernel(X_base, X_query)
+        # Compute kernel values for each pair of points
+        log_kernel_vals = log_kernel(X_base, X_query)
 
-    # Get positions for each class
-    indices = defaultdict(list)
-    for i, v in enumerate(encoded):
-        indices[v].append(i)
+        # Get positions for each class
+        indices = defaultdict(list)
+        for i, v in enumerate(encoded):
+            indices[v].append(i)
 
-    log_ps_cur = np.array(
-        [
-            logsumexp(log_kernel_vals[indices[k]])
-            for k in range(len(classes_cur))
-        ]
-    )
-
-    # Compute numerator for each class
-    log_ps_total_cur = logsumexp(
-        np.c_[
-            log_ps_cur,
-            log_pN + log_prior[classes_cur],
-        ],
-        axis=1,
-    )
-
-    # Compute denominator (it is the same for all classes)
-    log_denominator = logsumexp(
-        np.r_[
-            log_ps_cur,
-            log_pN,
-        ]
-    )
-
-    # Select class with top probability
-    idx_max = np.argmax(log_ps_total_cur)
-    # If max probability is greater than all prior probabilities,
-    # predict the corresponding class
-    if log_ps_total_cur[idx_max] > log_prior_default:
-        class_pred = classes_cur[idx_max]
-        log_numerator_p = log_ps_total_cur[idx_max]
-    # If max probability is still less than any prior probability
-    # then just predict the top prior class
-    else:
-        class_pred = class_default
-        log_numerator_p = log_prior_default
-
-    # Compute the Nadaraya-Watson estimator
-    log_ps_pred = log_numerator_p - log_denominator
-
-    # In case we don't need the uncertainty just return None
-    if not return_uncertainty:
-        return class_pred, log_ps_pred, -1.0
-
-    # Uncertainty prediction has the same two cases as probability
-    # prediction. By default, the numerator is given by p*(1-p)
-    # For convenience, (1-p) is denoted with _1mp
-    if log_ps_total_cur[idx_max] > log_prior_default:
-        log_numerator_1mp = logsumexp(
-            np.r_[
-                log_ps_cur[:idx_max],
-                log_ps_cur[idx_max + 1 :],
-                log_pN + np.log1p(-log_prior[idx_max]),
+        log_ps_cur = np.array(
+            [
+                logsumexp(log_kernel_vals[indices[k]])
+                for k in range(len(classes_cur))
             ]
         )
-    else:
-        log_numerator_1mp = logsumexp(
+
+        # Compute numerator for each class
+        log_ps_total_cur = logsumexp(
+            np.c_[
+                log_ps_cur,
+                log_pN + log_prior[classes_cur],
+            ],
+            axis=1,
+        )
+
+        # Compute denominator (it is the same for all classes)
+        log_denominator = logsumexp(
             np.r_[
                 log_ps_cur,
-                log_pN + np.log1p(-log_prior_default),
+                log_pN,
             ]
         )
 
-    log_uncertainty_total = (
-        log_numerator_p + log_numerator_1mp - 3 * log_denominator
-    )
+        # Select class with top probability
+        idx_max = np.argmax(log_ps_total_cur)
+        # If max probability is greater than all prior probabilities,
+        # predict the corresponding class
+        if log_ps_total_cur[idx_max] > log_prior_default:
+            class_pred = classes_cur[idx_max]
+            log_numerator_p = log_ps_total_cur[idx_max]
+        # If max probability is still less than any prior probability
+        # then just predict the top prior class
+        else:
+            class_pred = class_default
+            log_numerator_p = log_prior_default
 
-    return class_pred, log_ps_pred, log_uncertainty_total
+        # Compute the Nadaraya-Watson estimator
+        log_ps_pred = log_numerator_p - log_denominator
+
+        # In case we don't need the uncertainty just return None
+        if not return_uncertainty:
+            return class_pred, log_ps_pred, -1.0
+
+        # Uncertainty prediction has the same two cases as probability
+        # prediction. By default, the numerator is given by p*(1-p)
+        # For convenience, (1-p) is denoted with _1mp
+        if log_ps_total_cur[idx_max] > log_prior_default:
+            log_numerator_1mp = logsumexp(
+                np.r_[
+                    log_ps_cur[:idx_max],
+                    log_ps_cur[idx_max + 1 :],
+                    log_pN + np.log1p(-log_prior[idx_max]),
+                ]
+            )
+        else:
+            log_numerator_1mp = logsumexp(
+                np.r_[
+                    log_ps_cur,
+                    log_pN + np.log1p(-log_prior_default),
+                ]
+            )
+
+        log_uncertainty_total = (
+            log_numerator_p + log_numerator_1mp - 3 * log_denominator
+        )
+
+        return class_pred, log_ps_pred, log_uncertainty_total
+
+    elif nuq.calculate_sigma == "softmax":
+        softmax_probas = torch.nn.functional.softmax(torch.Tensor(X_query.copy()), dim=0)
+
+        class_pred = softmax_probas.argmax()
+        class_proba = softmax_probas.max()
+        log_ps_pred = np.log(class_proba)
+
+        log_sigma = log_ps_pred + np.log1p(class_proba)
+
+        # Create list of all present classes and their corresponding positions
+        classes_cur, encoded = np.unique(y_base, return_inverse=True)
+
+        # Compute kernel values for each pair of points
+        log_kernel_vals = log_kernel(X_base, X_query)
+
+        # Get positions for each class
+        indices = defaultdict(list)
+        for i, v in enumerate(encoded):
+            indices[v].append(i)
+
+        log_ps_cur = np.array(
+            [
+                logsumexp(log_kernel_vals[indices[k]])
+                for k in range(len(classes_cur))
+            ]
+        )
+
+        log_ps_total_cur = logsumexp(
+            np.c_[
+                log_ps_cur,
+                log_pN + log_prior[classes_cur],
+            ],
+            axis=1,
+        )
+
+        # Compute denominator (it is the same for all classes)
+        log_denominator = logsumexp(
+            np.r_[
+                log_ps_cur,
+                log_pN,
+            ]
+        )
+
+        log_uncertainty_total = log_sigma - log_denominator
+
+        return class_pred, log_ps_pred, log_uncertainty_total
+
+    elif nuq.calculate_sigma == "fixed":
+        if not nuq.sigma:
+            raise ValueError(f"Please provide sigma")
+        # Create list of all present classes and their corresponding positions
+        classes_cur, encoded = np.unique(y_base, return_inverse=True)
+
+        # Compute kernel values for each pair of points
+        log_kernel_vals = log_kernel(X_base, X_query)
+
+        # Get positions for each class
+        indices = defaultdict(list)
+        for i, v in enumerate(encoded):
+            indices[v].append(i)
+
+        log_ps_cur = np.array(
+            [
+                logsumexp(log_kernel_vals[indices[k]])
+                for k in range(len(classes_cur))
+            ]
+        )
+
+        # Compute numerator for each class
+        log_ps_total_cur = logsumexp(
+            np.c_[
+                log_ps_cur,
+                log_pN + log_prior[classes_cur],
+            ],
+            axis=1,
+        )
+
+        # Compute denominator (it is the same for all classes)
+        log_denominator = logsumexp(
+            np.r_[
+                log_ps_cur,
+                log_pN,
+            ]
+        )
+
+        # Select class with top probability
+        idx_max = np.argmax(log_ps_total_cur)
+        # If max probability is greater than all prior probabilities,
+        # predict the corresponding class
+        if log_ps_total_cur[idx_max] > log_prior_default:
+            class_pred = classes_cur[idx_max]
+            log_numerator_p = log_ps_total_cur[idx_max]
+        # If max probability is still less than any prior probability
+        # then just predict the top prior class
+        else:
+            class_pred = class_default
+            log_numerator_p = log_prior_default
+
+        # Compute the Nadaraya-Watson estimator
+        log_ps_pred = log_numerator_p - log_denominator
+
+        log_uncertainty_total = np.log(nuq.sigma) - log_denominator
+
+        return class_pred, log_ps_pred, log_uncertainty_total
+
+    else:
+        raise ValueError(f"Unknown way to calculate sigma: {nuq.calculate_sigma}")
 
 
 @ray.remote
@@ -186,6 +299,8 @@ def predict_log_proba_batch(
     log_pN: float,
     log_prior_default: float,
     class_default: int,
+    nuq,
+    softmax_probas = None,
     return_uncertainty: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Runs prediction pipeline on a single batch.
@@ -236,6 +351,7 @@ def predict_log_proba_batch(
         log_pN=log_pN,
         log_prior_default=log_prior_default,
         class_default=class_default,
+        nuq=nuq,
         return_uncertainty=return_uncertainty,
     )
     sl = np.s_[i : i + batch_size]
@@ -245,14 +361,24 @@ def predict_log_proba_batch(
     log_probas = np.empty(size, dtype=np.float32)
     log_uncs = np.empty(size, dtype=np.float32)
 
-    for j, (X, idx) in enumerate(zip(X_query[sl], idx_query[sl])):
-        log_kernel = get_log_kernel(
-            kernel_type,
-            bandwidth[idx] if len(bandwidth.shape) == 2 else bandwidth,
-        )
-        preds[j], log_probas[j], log_uncs[j] = predict_log_proba(
-            X_base[idx], y_base[idx], X, log_kernel
-        )
+    if softmax_probas is None:
+        for j, (X, idx) in enumerate(zip(X_query[sl], idx_query[sl])):
+            log_kernel = get_log_kernel(
+                kernel_type,
+                bandwidth[idx] if len(bandwidth.shape) == 2 else bandwidth,
+            )
+            preds[j], log_probas[j], log_uncs[j] = predict_log_proba(
+                X_base[idx], y_base[idx], X, log_kernel
+            )
+    else:
+        for j, (X, idx, sm_probs) in enumerate(zip(X_query[sl], idx_query[sl], softmax_probas[sl])):
+            log_kernel = get_log_kernel(
+                kernel_type,
+                bandwidth[idx] if len(bandwidth.shape) == 2 else bandwidth,
+            )
+            preds[j], log_probas[j], log_uncs[j] = predict_log_proba(
+                X_base[idx], y_base[idx], X, log_kernel, softmax_probas=sm_probs
+            )
 
     return i, preds, log_probas, log_uncs
 
