@@ -72,7 +72,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.batch_size = batch_size
         self.random_seed = random_seed
 
-    def _tune_kernel(self, X, y, strategy="isj"):
+    def _tune_kernel(self, X, y, log_p_x, strategy="isj"):
         standard_strategies = {
             "isj": improved_sheather_jones,
             "silverman": silvermans_rule,
@@ -88,7 +88,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             _, kwargs = parse_param(strategy)
             kwargs = dict(map(lambda x: (x[0], int(x[1])), kwargs.items()))
             bandwidth, score = optimal_bandwidth(
-                self, X, y, mode="classification", **kwargs
+                self, X, y, log_p_x, mode="classification", **kwargs
             )
             print(f"  [{strategy.upper()}] {bandwidth = } ({score = })")
         else:
@@ -99,6 +99,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self,
         X: np.ndarray,
         y: np.ndarray,
+        log_p_x: np.ndarray,
         bandwidth: Optional[np.ndarray] = None,
     ):
         """Prepares the model for inference:
@@ -147,7 +148,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
 
         # 2. Tune kernel bandwidth
         if self.tune_bandwidth is not None:
-            bandwidth = self._tune_kernel(X, y, strategy=self.tune_bandwidth)
+            bandwidth = self._tune_kernel(X, y, log_p_x, strategy=self.tune_bandwidth)
         bandwidth = np.array(bandwidth)
         if len(bandwidth.shape) not in [0, 1, 2]:
             raise ValueError(
@@ -172,6 +173,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
     def predict_proba(
         self,
         X: np.ndarray,
+        log_p_x: float,
         return_uncertainty: Optional[str] = None,
         batch_size: Optional[int] = None,
     ):
@@ -224,6 +226,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             log_pN=self.log_pN,
             log_prior_default=self.log_prior_default_,
             class_default=self.class_default_,
+            log_p_x=log_p_x,
             return_uncertainty=(return_uncertainty == "epistemic"),
         )
 
@@ -262,7 +265,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         elif return_uncertainty == "aleatoric":
             return probs, np.log1p(-np.exp(log_proba))
 
-    def predict(self, X: np.ndarray, return_uncertainty: Optional[str] = None):
+    def predict(self, X_log_p_x: list,
+                      return_uncertainty: Optional[str] = None):
         """Predicts class for each entry and corresponding
         uncertainties (optional).
 
@@ -284,7 +288,10 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
               - "epistemic": log (tau^2) without the normalizing factor, check NUQ paper
         """
 
-        probs = self.predict_proba(X, return_uncertainty=return_uncertainty)
+        X = X_log_p_x[0]
+        log_p_x = X_log_p_x[1]
+
+        probs = self.predict_proba(X, log_p_x, return_uncertainty=return_uncertainty)
         if return_uncertainty:
             probs, uncertainty = probs
         probs = self.label_encoder_.inverse_transform(

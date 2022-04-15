@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import ray
 from ray.worker import get
-from scipy.special import logsumexp
+from scipy.special import logsumexp, expm1
 from sklearn.model_selection import KFold, StratifiedKFold
 from tqdm.auto import tqdm
 
@@ -52,6 +52,7 @@ def predict_log_proba_single(
     y_base: np.ndarray,
     X_query: np.ndarray,
     log_kernel: Callable,
+    log_p_x: float,
     log_prior: np.ndarray,
     log_pN: float,
     log_prior_default: float,
@@ -146,28 +147,9 @@ def predict_log_proba_single(
     if not return_uncertainty:
         return class_pred, log_ps_pred, -1.0
 
-    # Uncertainty prediction has the same two cases as probability
-    # prediction. By default, the numerator is given by p*(1-p)
-    # For convenience, (1-p) is denoted with _1mp
-    if log_ps_total_cur[idx_max] > log_prior_default:
-        log_numerator_1mp = logsumexp(
-            np.r_[
-                log_ps_cur[:idx_max],
-                log_ps_cur[idx_max + 1 :],
-                log_pN + np.log1p(-log_prior[idx_max]),
-            ]
-        )
-    else:
-        log_numerator_1mp = logsumexp(
-            np.r_[
-                log_ps_cur,
-                log_pN + np.log1p(-log_prior_default),
-            ]
-        )
+    log_sigma = log_ps_pred + np.log1p(-expm1(log_ps_pred))
 
-    log_uncertainty_total = (
-        log_numerator_p + log_numerator_1mp - 3 * log_denominator
-    )
+    log_uncertainty_total = 2 * log_sigma - (log_p_x)
 
     return class_pred, log_ps_pred, log_uncertainty_total
 
@@ -186,6 +168,7 @@ def predict_log_proba_batch(
     log_pN: float,
     log_prior_default: float,
     class_default: int,
+    log_p_x: float,
     return_uncertainty: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Runs prediction pipeline on a single batch.
@@ -245,13 +228,13 @@ def predict_log_proba_batch(
     log_probas = np.empty(size, dtype=np.float32)
     log_uncs = np.empty(size, dtype=np.float32)
 
-    for j, (X, idx) in enumerate(zip(X_query[sl], idx_query[sl])):
+    for j, (X, idx, log_p) in enumerate(zip(X_query[sl], idx_query[sl], log_p_x[sl])):
         log_kernel = get_log_kernel(
             kernel_type,
             bandwidth[idx] if len(bandwidth.shape) == 2 else bandwidth,
         )
         preds[j], log_probas[j], log_uncs[j] = predict_log_proba(
-            X_base[idx], y_base[idx], X, log_kernel
+            X_base[idx], y_base[idx], X, log_kernel, log_p
         )
 
     return i, preds, log_probas, log_uncs
@@ -288,6 +271,7 @@ def optimal_bandwidth(
     model,
     X: np.ndarray,
     y: np.ndarray,
+    log_p_x: np.ndarray,
     n_points: int = 5,
     n_folds: int = 10,
     n_samples: int = 3,
@@ -352,7 +336,7 @@ def optimal_bandwidth(
         # Build kNN index
         X_train, y_train = X[train_idx], y[train_idx]
         X_val, y_val = X[val_idx], y[val_idx]
-        nuq.fit(X_train, y_train)
+        nuq.fit(X_train, y_train, log_p_x)
 
         # If grid is not set yet, initialize it
         if grid is None:
@@ -371,7 +355,8 @@ def optimal_bandwidth(
         scores = []
         for bandwidth in grid:
             nuq.bandwidth_ref_ = ray.put(np.array(bandwidth))
-            scores.append(nuq.score(X_val, y_val))
+            X_log_p_x_val = [X_val, log_p_x[val_idx]]
+            scores.append(nuq.score(X_log_p_x_val, y_val))
         results[f"fold_{i}"] = scores
         del nuq
 
