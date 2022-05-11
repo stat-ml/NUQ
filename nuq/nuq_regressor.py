@@ -219,7 +219,7 @@ class NuqRegressor(BaseEstimator, RegressorMixin):
 
         if return_uncertainty is None:
             return y_pr
-        elif return_uncertainty == "epistemic":
-            return y_pr, log_aleatoric
         elif return_uncertainty == "aleatoric":
+            return y_pr, log_aleatoric
+        elif return_uncertainty == "epistemic":
             return y_pr, log_epistemic
