@@ -18,4 +18,4 @@ print('initialized')
 model.fit(x_train, y_train)
 print('fitted')
 
-print(model.predict(x_val[:20]))
+print(model.predict(x_val[:10]))
