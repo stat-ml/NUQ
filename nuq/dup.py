@@ -1,11 +1,8 @@
-# level 3
-# epistemic
+# level 4
+# Solve the mysteri
 
-
-from statistics import mode
 import numpy as np
 import hnswlib
-from sklearn.metrics.pairwise import rbf_kernel
 
 
 class Kernel:
@@ -85,6 +82,7 @@ class NuqClassifierDup:
 
             tau = np.sqrt(tau_square)
             uncertainty = 2*np.sqrt(2) / np.sqrt(np.pi) * tau
+            uncertainty = np.log(uncertainty)
 
         return probabilities, uncertainty
 
