@@ -1,8 +1,6 @@
-# level 4
-# Solve the mysteri
-
 import numpy as np
 import hnswlib
+from scipy.special import logsumexp
 
 
 class Kernel:
@@ -16,7 +14,7 @@ class Kernel:
         self.bandwidth = bandwidth
 
         if kernel_type == 'RBF':
-            self._function = self._rbf
+            self._function = self._log_rbf
         else:
             raise ValueError(
                 f'Unknown kernel type, should be one of the following: {self.KERNEL_TYPES}'
@@ -25,8 +23,8 @@ class Kernel:
     def __call__(self, x1, x2=None):
         return self._function(x1, x2)
 
-    def _rbf(self, distance, _):
-        return np.exp(-distance/self.bandwidth**2)
+    def _log_rbf(self, distance, _):
+        return -distance/self.bandwidth**2/2
 
 
 class NuqClassifierDup:
@@ -49,11 +47,11 @@ class NuqClassifierDup:
         self.n_classes = np.max(y) + 1
 
     def predict(self, x, uncertainty_type=None):
-        probabilities, uncertainties = self.predict_proba(x, uncertainty_type)
-        predictions = np.argmax(probabilities, axis=-1)
+        log_probabilities, uncertainties = self.predict_log_proba(x, uncertainty_type)
+        predictions = np.argmax(log_probabilities, axis=-1)
         return predictions, uncertainties
 
-    def predict_proba(self, x, uncertainty_type=None):
+    def predict_log_proba(self, x, uncertainty_type=None):
         if self.index is None:
             raise RuntimeError('You should fit the model first')
         uncertainty = None
@@ -62,29 +60,32 @@ class NuqClassifierDup:
         neighbor_labels = self.labels[indices]
 
         similarities = self.kernel(distance_square)
-        normalization = np.sum(similarities, axis=1)
+        log_normalization = logsumexp(similarities, axis=1)
+        log_probabilities = np.empty((len(x), self.n_classes))
 
-        probabilities = np.ones((len(x), self.n_classes))
         for c in range(self.n_classes):
-            probabilities[:, c] = np.sum(similarities, axis=1, where=(neighbor_labels == c)) / normalization
+            log_probabilities[:, c] = logsumexp(np.where(neighbor_labels==c, similarities, -np.inf), axis=1) - log_normalization
 
+
+        probabilities = np.exp(log_probabilities)
         if uncertainty_type == 'aleatoric':
-            uncertainty = 1 - np.max(probabilities, axis=-1)
+            uncertainty = 1 - np.exp(np.max(log_probabilities, axis=-1))
         elif uncertainty_type == 'epistemic':
             sigma_square = probabilities * (1-probabilities)
-            sigma_square = np.max(sigma_square, axis=-1)
+            # Add 1e-99 to prevent log(0)
+            sigma_square = np.max(sigma_square, axis=-1) + 1e-99
+            # return log_probabilities, sigma_square
 
             h = self.kernel.bandwidth
             N = self.index.get_current_count()
-            probability_density = normalization / N / h**self.dims
-            kernel_volume = h**self.dims / 2 / np.sqrt(np.pi)
-            tau_square = (sigma_square / probability_density / N) * kernel_volume
+            d = self.dims
+            log_probability_density = log_normalization - np.log(N) - h*np.log(d)
+            # return log_probabilities, log_probability_density
+            log_kernel_volume = h*np.log(d) - np.log(2*np.sqrt(np.pi))
+            log_tau = np.log(sigma_square) - log_probability_density - np.log(N) + log_kernel_volume
+            uncertainty = np.log(2*np.sqrt(2) / np.sqrt(np.pi)) + log_tau
 
-            tau = np.sqrt(tau_square)
-            uncertainty = 2*np.sqrt(2) / np.sqrt(np.pi) * tau
-            uncertainty = np.log(uncertainty)
-
-        return probabilities, uncertainty
-
+        return log_probabilities, uncertainty
+    #
     def _update_bandwidth(self, new_bandwidth):
         self.kernel.bandwidth = new_bandwidth
