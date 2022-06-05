@@ -7,7 +7,7 @@ from sklearn.utils.validation import check_X_y
 from tqdm.auto import tqdm
 
 
-class NUQClassifierExact(BaseEstimator, ClassifierMixin):
+class NUQClassifierNaive(BaseEstimator, ClassifierMixin):
     def __init__(self,
                  kernel_type="rbf",
                  bandwidth=0.01,
@@ -48,13 +48,13 @@ class NUQClassifierExact(BaseEstimator, ClassifierMixin):
         N, d = X.shape
 
         # Integral of the squared kernel
-        # TODO: compute!
-        K2 = 1.0 / (2 ** d * (np.pi ** (d / 2.0)))
+        # https://math.stackexchange.com/questions/2849580/kernel-density-estimation-integral-of-squared-kernel
+        self.K2_ = 1.0 / (2 ** d * (np.pi ** (d / 2.0)))
 
         p_hat = self.K_.sum(axis=0)
         sigma_hat2 = eta_hat * (1.0 - eta_hat)
 
-        tau2 = 1 / (N * self.bandwidth ** d) * sigma_hat2 / p_hat * K2
+        tau2 = 1 / (N * self.bandwidth ** d) * sigma_hat2 / p_hat * self.K2_
 
         tau = np.sqrt(tau2)
 

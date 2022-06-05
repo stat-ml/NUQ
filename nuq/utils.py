@@ -23,20 +23,32 @@ def to_iterator(obj_ids):
 @ray.remote
 class HNSWActor:
     """Ray Actor interface for HNSW index to leverage the shared storage of `X_base` (vector index)."""
+    """Set n_neighbors=None to use exact (brute-force) kNN for testing."""
 
     def __init__(
-        self, X_base, M=16, ef_construction=200, random_seed=42, n_neighbors=20
+        self, X_base, M=16, ef_construction=200, random_seed=42, n_neighbors=20, brute_force=False,
     ):
         self.M = M
         self.ef_construction = ef_construction
         self.random_seed = random_seed
         self.n_neighbors = n_neighbors
 
+        print(f"{self.n_neighbors=}")
+
         N, dim = X_base.shape
-        self.index = hnswlib.Index(space="l2", dim=dim)
-        self.index.init_index(
-            max_elements=N, M=16, ef_construction=200, random_seed=42
-        )
+
+        if brute_force is not True:
+            self.index = hnswlib.Index(space="l2", dim=dim)
+            self.index.init_index(
+                max_elements=N, M=16, ef_construction=200, random_seed=42
+            )
+        else:
+            # Brute-force implementation for testing purposes
+            self.index = hnswlib.BFIndex(space="l2", dim=dim)
+            self.index.init_index(max_elements=N)
+            self.n_neighbors = N - 1
+            print(f"{self.n_neighbors=}")
+
         self.index.add_items(X_base)
 
     def knn_query(self, X, sl=np.s_[:, :], return_dist=True):
@@ -113,7 +125,7 @@ def predict_log_proba_single(
     log_ps_total_cur = logsumexp(
         np.c_[
             log_ps_cur,
-            log_pN + log_prior[classes_cur],
+            #log_pN + log_prior[classes_cur],
         ],
         axis=1,
     )
@@ -122,7 +134,7 @@ def predict_log_proba_single(
     log_denominator = logsumexp(
         np.r_[
             log_ps_cur,
-            log_pN,
+            #log_pN,
         ]
     )
 
@@ -130,7 +142,7 @@ def predict_log_proba_single(
     idx_max = np.argmax(log_ps_total_cur)
     # If max probability is greater than all prior probabilities,
     # predict the corresponding class
-    if log_ps_total_cur[idx_max] > log_prior_default:
+    if True or log_ps_total_cur[idx_max] > log_prior_default:
         class_pred = classes_cur[idx_max]
         log_numerator_p = log_ps_total_cur[idx_max]
     # If max probability is still less than any prior probability
@@ -149,19 +161,19 @@ def predict_log_proba_single(
     # Uncertainty prediction has the same two cases as probability
     # prediction. By default, the numerator is given by p*(1-p)
     # For convenience, (1-p) is denoted with _1mp
-    if log_ps_total_cur[idx_max] > log_prior_default:
+    if True or log_ps_total_cur[idx_max] > log_prior_default:
         log_numerator_1mp = logsumexp(
             np.r_[
                 log_ps_cur[:idx_max],
                 log_ps_cur[idx_max + 1 :],
-                log_pN + np.log1p(-log_prior[idx_max]),
+                #log_pN + np.log1p(-log_prior[idx_max]),
             ]
         )
     else:
         log_numerator_1mp = logsumexp(
             np.r_[
                 log_ps_cur,
-                log_pN + np.log1p(-log_prior_default),
+                #log_pN + np.log1p(-log_prior_default),
             ]
         )
 
@@ -246,6 +258,7 @@ def predict_log_proba_batch(
     log_uncs = np.empty(size, dtype=np.float32)
 
     for j, (X, idx) in enumerate(zip(X_query[sl], idx_query[sl])):
+        #print(f"{idx=}")
         log_kernel = get_log_kernel(
             kernel_type,
             bandwidth[idx] if len(bandwidth.shape) == 2 else bandwidth,
@@ -378,6 +391,7 @@ def optimal_bandwidth(
     results = pd.DataFrame(results)
     scores_mean = results.mean(axis=1)
     best_idx = scores_mean.argmax()
+    print(f"{grid=}, {results=}")
 
     return grid[best_idx], scores_mean[best_idx]
 

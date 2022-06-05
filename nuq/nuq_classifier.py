@@ -36,6 +36,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         verbose=False,
         batch_size=1000,
         random_seed=42,
+        brute_force=False,
     ):
         """Constructs an instance of NuqClassifier.
 
@@ -46,7 +47,8 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         kernel_type : str, optional
             kernel to use, by default "RBF"
         n_neighbors : int, optional
-            number of nearest neighbors, by default 20
+            number of nearest neighbors, by default 20,
+            None reverts to full brute-force kNN search (for testing)
         tune_bandwidth : str, optional
             bandwidth selection method, given by parameter string;
             for example, "classification:n_points=5;n_folds=10;n_samples=3",
@@ -71,6 +73,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
         self.verbose = verbose
         self.batch_size = batch_size
         self.random_seed = random_seed
+        self.brute_force = brute_force
 
     def _tune_kernel(self, X, y, strategy="isj"):
         standard_strategies = {
@@ -165,6 +168,7 @@ class NuqClassifier(BaseEstimator, ClassifierMixin):
             self.X_ref_,
             n_neighbors=self.n_neighbors,
             random_seed=self.random_seed,
+            brute_force=self.brute_force
         )
 
         return self
